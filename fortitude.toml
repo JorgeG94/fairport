@@ -1,0 +1,56 @@
+# fortitude configuration.
+#
+# pic keeps its equivalent in `fpm.toml` under `[extra.fortitude.check]`.
+# fairport is CMake-only and has no `fpm.toml`, so it lives in its own file.
+#
+# The rule set is pic's, with two deliberate differences, both noted below.
+
+[check]
+select = ["C", "E", "S", "PORT"]
+# pic selects C, E and S. PORT is added here because it caught a real bug on
+# its first run: `0_8` and `4242_8` as literal kind suffixes in the loader
+# tests. Kind 8 is not guaranteed to be `int64`, and a project whose whole
+# claim is bit-identical replay across four compilers has no business writing
+# one. They are now `0_int64` and `4242_int64`.
+
+ignore = [
+  # --- carried over from pic, same reasons ---
+  "C003", # implicit-typing rules already covered by `implicit none` everywhere
+  "C072", # assumed-length character without intent(in): `strip_comment` edits
+  #         its line in place, which is the whole point of it
+  "C142", # `exit`/`cycle` in an unlabelled loop -- the style guide positively
+  #         recommends both for keeping nesting shallow
+  "C181", # carried from pic
+  "C183", # `iostat`/`stat` without `iomsg`/`errmsg`: every site here turns the
+  #         status into an `error_t` with a message of its own
+  "S221", # carried from pic
+  "S262", # mixed scalar and array declarations on one line
+
+  # --- fairport only ---
+  "C182", # `stat` with multiple allocations in one statement.
+  #
+  # pic satisfies this rule naturally because it allocates one array per
+  # statement. fairport allocates the world's ten arrays, and the graph's
+  # four, in single statements sized once at load.
+  #
+  # The rule's stated benefit is knowing *which* allocation failed. Every
+  # handler here treats any allocation failure identically -- raise
+  # ERROR_ALLOC, return, and let `destroy` clean up whatever was allocated,
+  # which is safe because every `deallocate` is guarded by `allocated`. So the
+  # information the rule preserves is information this code never reads, and
+  # honouring it would add roughly sixty lines of boilerplate for no change in
+  # behaviour.
+  #
+  # Worth revisiting if a caller ever wants to recover from a partial
+  # allocation rather than give up.
+]
+
+line-length = 178
+# pic's figure. Fortran's continuation rules make a hard 100 columns expensive
+# in exactly the places readability matters most -- long `use ... only` lists
+# and multi-condition guards.
+
+# Note: pic sets `extend-exclude = ["test"]`. fairport does not. Its tests are
+# roughly a third of the source and include the loader suite, which is the
+# gnarliest string handling in the project; excluding it would skip the code
+# most likely to need a linter. It passes as-is.

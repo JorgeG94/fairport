@@ -1,0 +1,9 @@
+# Golden expectations and scenario scripts are compared byte for byte, so git
+# must not rewrite their line endings on checkout. A CRLF conversion here turns
+# a passing test into a Windows-only diff that looks like whitespace noise and
+# takes a day to find.
+* text=auto
+
+test/golden/*.txt -text
+scenarios/*.txt -text
+data/airports/* -text

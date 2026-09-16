@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-hash:
+    name: ${{ matrix.os }} / ${{ matrix.build }} / int8=${{ matrix.int8 }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        build: [Debug, Release]
+        int8: [OFF]
+        # One job with 8-byte default integers. It is not about coverage: the
+        # checkpoint format and the event digest must both be identical under
+        # either integer width, and the only way to know is to build both.
+        include:
+          - os: ubuntu-latest
+            build: Release
+            int8: ON
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up gfortran on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install gcc
+          echo "FC=gfortran-14" >> "$GITHUB_ENV"
+
+      - name: Set up gfortran on Windows
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc-fortran mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+          path-type: inherit
+
+      # pic is fetched and pinned by the build, so there is nothing to check out.
+      - name: Configure and build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build }} \
+                          -DPIC_DEFAULT_INT8=${{ matrix.int8 }}
+          cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      # The digest, not the exit code, is what this job exists to produce.
+      - name: Hash the reference scenario
+        run: ./build/fairport scenarios/clear_day.txt --seed 42 --hash > hash.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hash-${{ matrix.os }}-${{ matrix.build }}-int8${{ matrix.int8 }}
+          path: hash.txt
+
+  compare-hashes:
+    name: determinism fan-in
+    needs: build-and-hash
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+
+      # Per-job "ran it twice, got the same answer" only catches the easy half.
+      # This is the half that matters: different compilers, different platforms,
+      # different optimisation levels, one digest.
+      - name: Every platform must agree
+        run: |
+          find . -name hash.txt -exec cat {} \;
+          distinct=$(find . -name hash.txt -exec cat {} \; | sort -u | wc -l)
+          if [ "$distinct" -ne 1 ]; then
+            echo "DETERMINISM BROKEN ACROSS PLATFORMS"
+            find . -name hash.txt | while read -r f; do
+              echo "  $(cat "$f")  $f"
+            done
+            exit 1
+          fi
+          echo "all platforms agree"
+
+  checks:
+    name: lint, format and project rules
+    runs-on: ubuntu-latest
+    # Everything that does not need a Fortran compiler, in one job. The hooks
+    # pin their own tool versions and build their own environments, so this is
+    # the same run a contributor gets locally -- fortitude, fprettify,
+    # cmake-format, the whitespace hooks, the layering rules and the check that
+    # the generated sources match their templates.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install pre-commit
+      - run: pre-commit run --all-files --show-diff-on-failure

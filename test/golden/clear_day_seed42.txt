@@ -1,0 +1,22 @@
+
+ FAIRPORT            09:00:00     VIS 10000m   ARR 30/hr   DEP 30/hr
+
+ #  CALL      TYPE  PHASE      NODE  GATE  TD        ONBLK     TAXI
+  1  QFA412    H     at_gate      10    A2  06:45:00  06:47:49  2m49s
+  2  VOZ881    M     at_gate      11    A3  06:52:00  06:54:19  2m19s
+  3  UAE414    S     at_gate       9    A1  06:58:00  07:00:43  2m43s
+  4  JST615    M     at_gate      12    B1  07:04:00  07:06:53  2m53s
+
+ GATES  A1[UAE414] A2[QFA412] A3[VOZ881] B1[JST615] B2[------] B3[------]
+
+
+ ---- stats ----
+  sim time          09:00:00
+  aircraft          4
+  parked            4
+  mean gate-in      2m41s
+  events dispatched 35
+  events tombstoned 0
+  events scheduled  35
+  event log hash    096f18835cec2c95
+

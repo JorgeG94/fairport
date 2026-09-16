@@ -1,0 +1,357 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jorge Luis Galvez Vallejo
+#! ---------------------------------------------------------------------------
+#! Struct-of-arrays generator for fairport's canonical entity state.
+#!
+#! `soa_module(module_name, type_name, schema_name, fields, matrices)` emits a
+#! complete module holding one struct-of-arrays container: the type, the
+#! allocator, the serializer, the deserializer and the state hash, all from one
+#! field list. Add a field to the list and every one of them updates together.
+#! It is structurally impossible to add a field and forget the serializer,
+#! which is the failure mode this generator exists to make unreachable.
+#!
+#! A field is the 3-tuple (name, kind, doc), where kind is 'i32' or 'i64'.
+#! A matrix is the 4-tuple (name, rows, kind, doc): a rank-2 field of shape
+#! (rows, capacity), such as a route.
+#!
+#! Integer kinds only, deliberately. Canonical simulation state carries no
+#! reals (design doc 2.1), and a generator that cannot express one cannot be
+#! talked into it at four in the afternoon.
+#!
+#! ## Why the bodies delegate to pic_soa
+#!
+#! The wire format is pic's, not fairport's. `pic_soa` sits on `pic_serialize`
+#! and gives every stream a 16-byte header with a magic number, a byte-order
+#! mark and a format version, then length-prefixed type-tagged records, and a
+#! read path that detects a swapped byte order and reports a truncated or
+#! mistyped record by field name.
+#!
+#! The first version of this template hand-rolled that envelope and got it
+#! wrong in a way worth recording: it wrote the element count as
+#! `integer(default_int)`, whose width is `int32` or `int64` depending on
+#! `PIC_DEFAULT_INT8`. A checkpoint written by one build was therefore
+#! unreadable by the other, and every record after the count misaligned.
+#! `soa_write_prologue` writes an explicit `int64` precisely to stop that. In a
+#! project whose CI thesis is a cross-platform determinism fan-in, the
+#! checkpoint format is the last place to keep a private reimplementation of
+#! something the library already had.
+#!
+#! Streams must be opened with `access='stream'`, `form='unformatted'`.
+#!
+#! fypp runs at development time only. The generated .f90 is committed, so
+#! building fairport needs neither fypp nor Python. See tools/autogen/autogen.sh.
+#! ---------------------------------------------------------------------------
+#:set SOA_DECL = {'i32': 'integer(int32)', 'i64': 'integer(int64)'}
+#:set SOA_KIND = {'i32': 'int32', 'i64': 'int64'}
+#:def soa_module(module_name, type_name, schema_name, fields, matrices)
+#:set SCHEMA = schema_name + ';' + ','.join([f[0] + ':' + f[1] for f in fields] + [m[0] + ':' + m[2] + 'x' + str(m[1]) for m in matrices])
+#:set USED = sorted(set([SOA_KIND[f[1]] for f in fields] + [SOA_KIND[m[2]] for m in matrices]))
+!! Struct-of-arrays container for ${schema_name}$ state.
+!!
+!! GENERATED FILE -- DO NOT EDIT.
+!! Produced by `tools/autogen/core_aircraft.fypp`; edit the template and rerun
+!! `tools/autogen/autogen.sh` instead.
+module ${module_name}$
+   !! ${len(fields)}$ scalar field arrays and ${len(matrices)}$ matrix field(s), serialized and hashed together.
+   !!
+   !! The schema string below is written into every stream and folded into
+   !! every digest, so a checkpoint from a different field list fails loudly
+   !! instead of decoding as garbage:
+   !!
+   !! ```
+   !! ${SCHEMA}$
+   !! ```
+   !!
+   !! prefixed by `SOA_SCHEMA_PREFIX`, which carries pic's own record-layout
+   !! version. Fields are written and folded in exactly the order declared
+   !! below, scalars first and matrices last.
+   use core_kinds, only: ${', '.join(USED)}$, id_k, NO_ID
+   use pic_types, only: default_int
+   use pic_error, only: error_t, error_raise, ERROR_ALLOC, ERROR_VALIDATION
+   use pic_array_hash, only: array_hash64_t
+   use pic_soa, only: SOA_SCHEMA_PREFIX, soa_write_prologue, soa_read_prologue, &
+                      soa_write_field, soa_read_field, soa_hash_begin, soa_hash_field
+   implicit none
+   private
+
+   public :: ${type_name}$
+   public :: ${schema_name.upper()}$_SCHEMA
+#:for name, rows, kind, doc in matrices
+   public :: ${schema_name.upper()}$_${name.upper()}$_ROWS
+#:endfor
+
+   character(len=*), parameter :: ${schema_name.upper()}$_SCHEMA = SOA_SCHEMA_PREFIX//"${SCHEMA}$"
+      !! Layout identity. Any change to the field list changes it, which
+      !! retires every older checkpoint through the ordinary mismatch path.
+
+#:for name, rows, kind, doc in matrices
+   integer(default_int), parameter :: ${schema_name.upper()}$_${name.upper()}$_ROWS = ${rows}$_default_int
+      !! Rows of the `${name}$` matrix. Part of the schema, so changing it
+      !! retires old checkpoints rather than misreading them.
+#:endfor
+
+   type :: ${type_name}$
+      !! Canonical ${schema_name}$ state, one contiguous array per field.
+#:for name, kind, doc in fields
+      ${SOA_DECL[kind]}$, allocatable :: ${name}$(:)
+         !! ${doc}$
+#:endfor
+#:for name, rows, kind, doc in matrices
+      ${SOA_DECL[kind]}$, allocatable :: ${name}$(:, :)
+         !! ${doc}$ Shape (${schema_name.upper()}$_${name.upper()}$_ROWS, capacity).
+#:endfor
+      integer(default_int) :: n = 0_default_int
+         !! Entities in use.
+      integer(default_int) :: cap = 0_default_int
+         !! Entities the arrays have room for.
+   contains
+      procedure :: reserve => ${schema_name}$_reserve
+      procedure :: add => ${schema_name}$_add
+      procedure :: size => ${schema_name}$_size
+      procedure :: capacity => ${schema_name}$_capacity
+      procedure :: serialize => ${schema_name}$_serialize
+      procedure :: deserialize => ${schema_name}$_deserialize
+      procedure :: state_hash64 => ${schema_name}$_state_hash64
+      procedure :: destroy => ${schema_name}$_destroy
+   end type ${type_name}$
+
+contains
+
+   subroutine ${schema_name}$_reserve(this, cap, err)
+      !! Allocate room for `cap` entities, zeroed, discarding any contents.
+      !!
+      !! Sized once at load, as the design intends: core simulation state does
+      !! not grow during a run, so there is no reallocation to make an event
+      !! ordering depend on a heap address.
+      class(${type_name}$), intent(inout) :: this
+      integer(default_int), intent(in) :: cap
+         !! Entities to make room for; must not be negative.
+      type(error_t), intent(inout), optional :: err
+
+      integer :: status
+
+      if (cap < 0_default_int) then
+         call error_raise(err, ERROR_VALIDATION, "${schema_name}$_reserve: negative capacity")
+         return
+      end if
+
+      call this%destroy()
+
+      allocate ( &
+#:for name, kind, doc in fields
+         this%${name}$(cap), &
+#:endfor
+#:for name, rows, kind, doc in matrices
+         this%${name}$(${schema_name.upper()}$_${name.upper()}$_ROWS, cap), &
+#:endfor
+         stat=status)
+      if (status /= 0) then
+         call error_raise(err, ERROR_ALLOC, "${schema_name}$_reserve: allocation failed")
+         return
+      end if
+
+#:for name, kind, doc in fields
+      this%${name}$ = 0_${SOA_KIND[kind]}$
+#:endfor
+#:for name, rows, kind, doc in matrices
+      this%${name}$ = NO_ID
+#:endfor
+      this%n = 0_default_int
+      this%cap = cap
+   end subroutine ${schema_name}$_reserve
+
+   subroutine ${schema_name}$_add(this, index, err)
+      !! Claim the next free slot and return its one-based index.
+      !!
+      !! Reports `ERROR_VALIDATION` rather than growing: exceeding the loaded
+      !! capacity is a scenario error, and silently reallocating here would
+      !! hide it until a checkpoint failed to match.
+      class(${type_name}$), intent(inout) :: this
+      integer(id_k), intent(out) :: index
+         !! One-based slot, or `NO_ID` when the container is full.
+      type(error_t), intent(inout), optional :: err
+
+      index = NO_ID
+      if (this%n >= this%cap) then
+         call error_raise(err, ERROR_VALIDATION, "${schema_name}$_add: capacity exhausted")
+         return
+      end if
+
+      this%n = this%n + 1_default_int
+      index = int(this%n, id_k)
+   end subroutine ${schema_name}$_add
+
+   pure function ${schema_name}$_size(this) result(n)
+      !! Number of entities in use.
+      class(${type_name}$), intent(in) :: this
+      integer(default_int) :: n
+
+      n = this%n
+   end function ${schema_name}$_size
+
+   pure function ${schema_name}$_capacity(this) result(cap)
+      !! Number of entities the arrays have room for.
+      class(${type_name}$), intent(in) :: this
+      integer(default_int) :: cap
+
+      cap = this%cap
+   end function ${schema_name}$_capacity
+
+   subroutine ${schema_name}$_serialize(this, unit, err)
+      !! Write the live slice of every field to an unformatted stream.
+      !!
+      !! `unit` must be open with `access='stream'`, `form='unformatted'`.
+      class(${type_name}$), intent(in) :: this
+      integer, intent(in) :: unit
+         !! Stream unit opened for writing.
+      type(error_t), intent(inout), optional :: err
+
+      type(error_t) :: fault
+      integer(default_int) :: stream
+#:if matrices
+      ${SOA_DECL[matrices[0][2]]}$, allocatable :: flat(:)
+      integer :: status
+#:endif
+
+      stream = int(unit, default_int)
+
+      call soa_write_prologue(stream, ${schema_name.upper()}$_SCHEMA, this%n, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+
+#:for name, kind, doc in fields
+      call soa_write_field(stream, this%${name}$, this%n, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+#:endfor
+
+#:for name, rows, kind, doc in matrices
+      ! A matrix goes out as one flat record of ROWS*n elements, in Fortran
+      ! column-major order, so reading it back is a reshape and not a guess.
+      allocate (flat(${schema_name.upper()}$_${name.upper()}$_ROWS*this%n), stat=status)
+      if (status /= 0) then
+         call error_raise(err, ERROR_ALLOC, "${schema_name}$_serialize: ${name}$ buffer allocation failed")
+         return
+      end if
+      flat = reshape(this%${name}$(:, 1:this%n), [${schema_name.upper()}$_${name.upper()}$_ROWS*this%n])
+      call soa_write_field(stream, flat, ${schema_name.upper()}$_${name.upper()}$_ROWS*this%n, fault)
+      deallocate (flat)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+#:endfor
+   end subroutine ${schema_name}$_serialize
+
+   subroutine ${schema_name}$_deserialize(this, unit, err)
+      !! Read back what `serialize` wrote, into an already reserved container.
+      !!
+      !! The container keeps the capacity it was reserved with; only the live
+      !! count changes. Reading straight into the field arrays would resize
+      !! them to the stream's length and quietly break the rule that core
+      !! state is sized once at load.
+      class(${type_name}$), intent(inout) :: this
+      integer, intent(in) :: unit
+         !! Stream unit opened for reading.
+      type(error_t), intent(inout), optional :: err
+
+      type(error_t) :: fault
+      integer(default_int) :: stream, n
+      logical :: swapped
+#:for name, kind, doc in fields
+      ${SOA_DECL[kind]}$, allocatable :: buffer_${name}$(:)
+#:endfor
+#:for name, rows, kind, doc in matrices
+      ${SOA_DECL[kind]}$, allocatable :: buffer_${name}$(:)
+#:endfor
+
+      stream = int(unit, default_int)
+
+      call soa_read_prologue(stream, ${schema_name.upper()}$_SCHEMA, n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+      if (n > this%cap) then
+         call error_raise(err, ERROR_VALIDATION, &
+                          "${schema_name}$_deserialize: stream holds more entities than the container was reserved for")
+         return
+      end if
+
+#:for name, kind, doc in fields
+      call soa_read_field(stream, "${name}$", buffer_${name}$, n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+#:endfor
+
+#:for name, rows, kind, doc in matrices
+      call soa_read_field(stream, "${name}$", buffer_${name}$, &
+                          ${schema_name.upper()}$_${name.upper()}$_ROWS*n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+#:endfor
+
+      ! Nothing is committed until every record has been read, so a truncated
+      ! stream leaves the container as it was rather than half updated.
+#:for name, kind, doc in fields
+      this%${name}$(1:n) = buffer_${name}$
+#:endfor
+#:for name, rows, kind, doc in matrices
+      this%${name}$(:, 1:n) = reshape(buffer_${name}$, [${schema_name.upper()}$_${name.upper()}$_ROWS, n])
+#:endfor
+      this%n = n
+   end subroutine ${schema_name}$_deserialize
+
+   function ${schema_name}$_state_hash64(this) result(digest)
+      !! Fingerprint the live slice of every field, in declaration order.
+      !!
+      !! Sixty-four bits because these digests are used as identifiers, not
+      !! only compared in pairs: among 10**5 distinct 32-bit digests some pair
+      !! collides with probability about 69%, against 3e-10 at 64 bits.
+      !!
+      !! The byte stream is the one `pic_soa` defines, so a digest here means
+      !! the same thing as a digest of any other pic SoA container.
+      class(${type_name}$), intent(in) :: this
+      integer(int64) :: digest
+
+      type(array_hash64_t) :: hasher
+#:if matrices
+      ${SOA_DECL[matrices[0][2]]}$, allocatable :: flat(:)
+#:endif
+
+      call soa_hash_begin(hasher, ${schema_name.upper()}$_SCHEMA, this%n)
+#:for name, kind, doc in fields
+      call soa_hash_field(hasher, this%${name}$, this%n)
+#:endfor
+#:for name, rows, kind, doc in matrices
+      flat = reshape(this%${name}$(:, 1:this%n), [${schema_name.upper()}$_${name.upper()}$_ROWS*this%n])
+      call soa_hash_field(hasher, flat, ${schema_name.upper()}$_${name.upper()}$_ROWS*this%n)
+#:endfor
+      digest = hasher%digest()
+   end function ${schema_name}$_state_hash64
+
+   subroutine ${schema_name}$_destroy(this)
+      !! Release every array and reset the counts.
+      class(${type_name}$), intent(inout) :: this
+
+#:for name, kind, doc in fields
+      if (allocated(this%${name}$)) deallocate (this%${name}$)
+#:endfor
+#:for name, rows, kind, doc in matrices
+      if (allocated(this%${name}$)) deallocate (this%${name}$)
+#:endfor
+      this%n = 0_default_int
+      this%cap = 0_default_int
+   end subroutine ${schema_name}$_destroy
+
+end module ${module_name}$
+#:enddef
+$:soa_module('core_aircraft', 'aircraft_soa_t', 'aircraft', [('phase', 'i32', 'Current phase of flight, one of the PHASE_* codes.'), ('wake', 'i32', 'Wake turbulence category, one of the WAKE_* codes.'), ('gate', 'i32', 'Assigned gate, or NO_ID.'), ('node', 'i32', 'Taxiway node the aircraft is currently at.'), ('goal', 'i32', 'Taxiway node it is routing to.'), ('generation', 'i32', 'Tombstone counter; bumping it invalidates pending events.'), ('route_len', 'i32', 'Number of nodes in the planned route.'), ('route_pos', 'i32', 'Index into the route of the node last reached.'), ('pax', 'i32', 'Passengers on board.'), ('touchdown_tick', 'i64', 'Sim time of touchdown.'), ('on_blocks_tick', 'i64', 'Sim time the aircraft parked.'), ('delay_ms', 'i64', 'Accrued delay in milliseconds.')], [('route', 64, 'i32', 'Planned taxi route, one column per aircraft.')])

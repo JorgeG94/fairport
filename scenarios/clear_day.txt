@@ -1,0 +1,21 @@
+# A quiet morning bank. Four arrivals, no weather, nothing goes wrong.
+#
+# This is the milestone 0 acceptance run: one aircraft lands, taxis and parks,
+# and then three more do the same without tripping over each other.
+#
+# A session is a file, so this is also the regression test:
+#   fairport scenarios/clear_day.txt --seed 42 --hash
+
+seed 42
+max_aircraft 16
+load airport data/airports/simple.airport
+
+arrival QFA412 H 240 at 06:45 runway 1
+arrival VOZ881 M 170 at 06:52 runway 1
+arrival UAE414 S 380 at 06:58 runway 1
+arrival JST615 M 186 at 07:04 runway 1
+
+run until 09:00
+
+board
+dump stats

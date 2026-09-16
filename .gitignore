@@ -67,3 +67,13 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Planning documents. These are the specification fairport was built from and
+# they live on disk, but they are working notes rather than part of the
+# deliverable, so they stay out of the repository.
+airport-sim-design.md
+airport-sim-design-fortran.md
+pic-features-design.md
+
+# Local tool virtualenv (fprettify, fortitude, pre-commit).
+.venv/

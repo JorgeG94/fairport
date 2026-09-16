@@ -1,0 +1,94 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jorge Luis Galvez Vallejo
+#! ---------------------------------------------------------------------------
+#! The canonical event list.
+#!
+#! APPEND ONLY. NEVER REORDER. NEVER DELETE.
+#!
+#! These integers appear in every saved command log, every golden expectation
+#! and every determinism hash fairport has ever produced. Renumbering one of
+#! them does not break a build, it silently decodes old material as something
+#! else. Add new kinds at the end of their section; the gaps between sections
+#! are there so that a later addition can still be grouped sensibly.
+#!
+#! fypp runs at development time only. The generated .f90 is committed, so
+#! building fairport needs neither fypp nor Python. See tools/autogen/autogen.sh.
+#! ---------------------------------------------------------------------------
+#:set EVENTS = [                                                              &
+  ('Touchdown',                 1, 'An arrival has touched down.'),           &
+  ('RolloutComplete',           2, 'The landing roll is over.'),              &
+  ('RunwayExited',              3, 'The runway is clear behind an arrival.'), &
+  ('TaxiNodeReached',           4, 'An aircraft reached a taxiway node.'),    &
+  ('OnBlocks',                  5, 'An aircraft is parked on a gate.'),       &
+  ('TurnaroundComplete',        6, 'A turnaround has finished.'),             &
+  ('PushbackRequested',         7, 'A departure has requested pushback.'),    &
+  ('PushbackComplete',          8, 'Pushback is complete.'),                  &
+  ('LineUpCleared',             9, 'A departure is cleared to line up.'),     &
+  ('TakeoffRollComplete',      10, 'A departure has left the ground.'),       &
+  ('BingoFuel',                11, 'A holding arrival reached bingo fuel.'),  &
+  ('HoldEntered',              12, 'An arrival entered the holding stack.'),  &
+  ('CapacityChanged',          13, 'Declared capacity has changed.'),         &
+  ('WeatherChanged',           14, 'The weather has changed.'),               &
+  ('GateAssigned',             15, 'A gate has been assigned.'),              &
+  ('GateReleased',             16, 'A gate has been given up.'),              &
+  ('ReplanRequested',          17, 'A route must be recomputed.'),            &
+  ('IncidentTriggered',        18, 'An incident has fired.'),                 &
+  ('PassengerEnteredConcourse',40, 'Landside, milestone 3.'),                 &
+  ('PassengerExitedArrivals',  41, 'Landside, milestone 3.'),                 &
+  ('PurchaseMade',             42, 'Landside, milestone 3.'),                 &
+  ('CurbQueueChanged',         43, 'Landside, milestone 3.'),                 &
+  ('BagLoaded',                44, 'Landside, milestone 3.'),                 &
+  ('BagStolen',                45, 'Landside, milestone 3.')                  ]
+!! Stable numeric identifiers for every event kind.
+!!
+!! GENERATED FILE -- DO NOT EDIT.
+!! Produced by `tools/autogen/core_event_kinds.fypp`; edit the template and
+!! rerun `tools/autogen/autogen.sh` instead.
+module core_event_kinds
+   !! One append-only list generates the constants, the name lookup and the
+   !! bus dispatch bound, so the three can never drift apart.
+   use core_kinds, only: int16
+   implicit none
+   private
+
+   public :: event_name
+   public :: MAX_EVENT_KIND
+   public :: N_EVENT_KINDS
+
+#:for name, ident, doc in EVENTS
+   integer(int16), parameter, public :: K_${name.upper()}$ = ${ident}$_int16
+      !! ${doc}$
+#:endfor
+
+   integer, parameter :: MAX_EVENT_KIND = ${max(i for _, i, _ in EVENTS)}$
+      !! Largest identifier in use, and therefore the upper bound of the bus
+      !! dispatch table. Default integer kind on purpose: it is an array bound,
+      !! not simulation state. Recomputed by fypp whenever the list grows.
+
+   integer, parameter :: N_EVENT_KINDS = ${len(EVENTS)}$
+      !! How many kinds are declared, which is not `MAX_EVENT_KIND` because the
+      !! numbering leaves gaps between sections.
+
+contains
+
+   pure function event_name(kind) result(name)
+      !! Human-readable name of an event kind, for logs and queue dumps.
+      !!
+      !! An unknown kind is not an error: a log written by a newer build can
+      !! still be read by an older one, and "Unknown" is more useful than a
+      !! crash.
+      integer(int16), intent(in) :: kind
+         !! Identifier to look up.
+      character(len=:), allocatable :: name
+
+      select case (kind)
+#:for name, ident, doc in EVENTS
+      case (${ident}$_int16)
+         name = "${name}$"
+#:endfor
+      case default
+         name = "Unknown"
+      end select
+   end function event_name
+
+end module core_event_kinds

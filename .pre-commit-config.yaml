@@ -1,0 +1,83 @@
+---
+# Mirrors pic's configuration, with the differences noted per hook.
+#
+# Install into the local venv:
+#   .venv/bin/pre-commit install
+#
+# Run over everything without committing:
+#   .venv/bin/pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.13
+    hooks:
+      - id: cmake-format
+        name: CMake Format
+        entry: cmake-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-shebang-scripts-are-executable
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-yaml
+      - id: check-symlinks
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: check-case-conflict
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      # Generated sources are excluded on purpose. `src/core/generated/` is
+      # fypp output, and `tools/autogen/check_generated.sh` asserts that what is
+      # committed is byte-for-byte what the template produces. If fprettify
+      # reformatted it, that check would fail and the fix would be to reformat
+      # the .f90 -- which the next `autogen.sh` would undo. Formatting of
+      # generated code belongs in the template.
+      - id: fprettify
+        name: fprettify
+        entry: fprettify --silent
+        # pic uses `language: system`, which needs the tool on PATH and so
+        # needs a venv activated first. `language: python` has pre-commit build
+        # and cache its own environment, so a fresh clone can run the hooks
+        # without installing anything by hand, and everyone gets the same
+        # version rather than whatever their venv happens to hold.
+        language: python
+        additional_dependencies: [fprettify==0.3.7]
+        types: [file]
+        files: '\.(f|F|f90|F90)$'
+        exclude: '^src/core/generated/'
+
+      # Golden expectations are compared byte for byte, so the whitespace hooks
+      # above must not touch them either.
+      - id: fortitude
+        name: fortitude
+        entry: fortitude check
+        language: python
+        additional_dependencies: [fortitude-lint==0.9.2]
+        pass_filenames: false
+        types: [file]
+        files: '\.(f|F|f90|F90)$'
+
+      # The project's own rules, run here as well as in ctest. Here they fire
+      # before a commit exists; there they fire for anyone who only runs the
+      # test suite. Both are cheap and neither is the other's backup.
+      - id: layering
+        name: layering rules
+        entry: tools/check_layering.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+
+      - id: generated-sources
+        name: generated sources are current
+        entry: tools/autogen/check_generated.sh
+        language: python
+        additional_dependencies: [fypp==3.2]
+        pass_filenames: false
+        always_run: true
+
+exclude: '^(test/golden/|data/airports/|scenarios/)'

@@ -1,0 +1,77 @@
+# fairport airport -- SIMPLE
+#
+# One runway, six stands, fifteen taxiway nodes. This is the milestone 1
+# airport from the design document, loaded at milestone 0 with only the
+# arrival half in use.
+#
+# Nodes are numbered implicitly, in the order they appear below, starting at 1.
+# Edges are undirected and cost is taxi time in milliseconds.
+#
+#   node <kind> <x_cm> <y_cm> <max_wake>
+#   edge <from> <to> <cost_ms>
+#   gate <label> <node> <max_wake>
+#   runway <label> <threshold_node> <exit_node>
+
+name SIMPLE
+
+#  1  runway 09 threshold
+node runway_threshold        -180000        0  S
+#  2  runway 09 midpoint, rapid exit
+node runway_exit              -40000        0  S
+#  3  runway 09 far end
+node runway_exit              120000        0  S
+#  4  hold short of 09 at the apron entrance
+node hold_short               -40000   -12000  S
+#  5  apron entrance
+node intersection             -40000   -30000  S
+#  6  taxiway A midpoint
+node intersection              20000   -30000  S
+#  7  taxiway A east
+node intersection              90000   -30000  S
+#  8  taxiway B west
+node intersection            -100000   -30000  S
+#  9  stand lead-in A1
+node gate                    -100000   -52000  H
+# 10  stand lead-in A2
+node gate                     -50000   -52000  H
+# 11  stand lead-in A3
+node gate                          0   -52000  M
+# 12  stand lead-in B1
+node gate                      45000   -52000  M
+# 13  stand lead-in B2
+node gate                      90000   -52000  M
+# 14  stand lead-in B3
+node gate                     130000   -52000  L
+# 15  de-icing pad
+node deice_pad                150000   -30000  H
+
+# runway centreline, used by departures from milestone 1
+edge 1 2 55000
+edge 2 3 40000
+
+# vacating the runway onto the apron
+edge 2 4 25000
+edge 4 5 20000
+
+# the apron spine
+edge 5 8 30000
+edge 5 6 35000
+edge 6 7 38000
+edge 7 15 32000
+
+# stand lead-ins
+edge 8 9 18000
+edge 8 10 26000
+edge 5 11 22000
+edge 6 12 24000
+edge 7 13 19000
+edge 7 14 28000
+
+gate A1 9 S
+gate A2 10 H
+gate A3 11 M
+gate B1 12 M
+gate B2 13 M
+gate B3 14 L
+
+runway 09 1 2

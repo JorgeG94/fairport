@@ -1,0 +1,33 @@
+# The scenario the design document names, and the milestone 1 payoff.
+#
+# A normal morning until 08:00, then fog drops visibility to 400 metres --
+# below minima, so the declared rates go to zero and the airport accepts
+# nothing. What follows is the cascade from design section 6.6, and none of it
+# is special-cased anywhere:
+#
+#   departures cannot push, so they keep their stands
+#   arrivals cannot park, so they hold
+#   holding burns fuel, so they reach bingo
+#   at bingo they divert, permanently, and that is a hard failure
+#
+# Reopening at 10:00 is not recovery. The stack that built up still has to be
+# drained at the capacity that has just been restored, and that drain is the
+# rest of the day.
+#
+# Compare against scenarios/full_day.txt, which is the same traffic and the
+# same seed with no weather:
+#
+#   fairport scenarios/full_day.txt --seed 42   ->  0 diverted
+#   fairport scenarios/fog_bank.txt --seed 42   -> 14 diverted
+
+seed 42
+max_aircraft 128
+load airport data/airports/simple.airport
+load schedule data/schedules/day1.toml
+
+at 08:00 set_visibility 400
+at 10:00 set_visibility 8000
+
+run until 23:00
+
+dump stats

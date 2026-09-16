@@ -1,5 +1,6 @@
 set(tests
     "core_graph"
+    "core_reservations"
     "core_scheduler"
     "core_bus"
     "core_aircraft"
@@ -7,6 +8,8 @@ set(tests
     "core_time"
     "sys_arrival"
     "sys_departure"
+    "sys_ops_policy"
+    "sequencing"
     "core_determinism"
     "app_text"
     "app_loader"
@@ -80,6 +83,26 @@ endif()
 # width in app_text. One golden per scenario. clear_day proves the no-command
 # path; stand_squeeze proves the command path, and that a command log plus a
 # seed is a session.
+add_test(
+  NAME "fairport/golden_costly_favour"
+  COMMAND
+    ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
+    -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/costly_favour.txt
+    -DGOLDEN=${CMAKE_SOURCE_DIR}/test/golden/costly_favour_seed42.txt
+    -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/golden_actual_favour.txt -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/golden.cmake
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+add_test(
+  NAME "fairport/golden_fog_bank"
+  COMMAND
+    ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
+    -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/fog_bank.txt
+    -DGOLDEN=${CMAKE_SOURCE_DIR}/test/golden/fog_bank_seed42.txt
+    -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/golden_actual_fog.txt -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/golden.cmake
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 add_test(
   NAME "fairport/golden_stand_squeeze"
   COMMAND

@@ -33,7 +33,7 @@ module sys_departure
    use core_event_kinds, only: K_ONBLOCKS, K_TURNAROUNDCOMPLETE, K_PUSHBACKREQUESTED, &
                                K_PUSHBACKCOMPLETE, K_GATERELEASED, K_LINEUPCLEARED, &
                                K_TAKEOFFROLLCOMPLETE, K_LINEUPREQUESTED, &
-                               K_CMD_HOLD_DEPARTURE, &
+                               K_CMD_HOLD_DEPARTURE, K_CMD_SEQUENCE_DEPARTURE, &
                                K_CMD_RELEASE_DEPARTURE
    use core_rng, only: stream_t
    use core_scheduler, only: scheduler_t
@@ -43,6 +43,7 @@ module sys_departure
                          PHASE_TAXI_OUT, PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED, &
                          WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    use sys_arrival, only: earliest_slot
+   use sys_ops_policy, only: rate_spacing_ms
    use pic_types, only: default_int
    use pic_random_dist, only: next_range
    implicit none
@@ -74,6 +75,16 @@ module sys_departure
    integer(tick_k), parameter :: TAKEOFF_ROLL_MS = 45_tick_k*SECOND
       !! Time from brakes-off to airborne.
    integer(tick_k), parameter :: HOLD_RETRY_MS = 2_tick_k*MINUTE
+   integer(tick_k), parameter :: QUEUE_RETRY_MS = 30_tick_k*SECOND
+      !! How often a departure that is not at the front of the queue asks
+      !! again. Short, because the front of the queue changes every time one
+      !! rolls, and an aircraft waiting a full circuit for a slot that freed
+      !! ten seconds ago is throughput thrown away.
+   integer(tick_k), parameter :: CLOSED_RETRY_MS = 5_tick_k*MINUTE
+      !! How often a departure asks again while the airport is not releasing
+      !! any. Five minutes rather than one: a closure lasts hours, and forty
+      !! aircraft asking every minute is a lot of events for an answer that has
+      !! not changed.
       !! How often a held departure asks again after being released.
 
    type, extends(system_t) :: departure_system_t
@@ -128,6 +139,8 @@ contains
          call line_up(w, sched, event)
       case (K_TAKEOFFROLLCOMPLETE)
          call airborne(w, event)
+      case (K_CMD_SEQUENCE_DEPARTURE)
+         call commanded_sequence(w, event)
       case (K_CMD_HOLD_DEPARTURE)
          call commanded_hold(w, event, .true.)
       case (K_CMD_RELEASE_DEPARTURE)
@@ -203,6 +216,23 @@ contains
       if (w%aircraft%phase(aircraft) /= PHASE_READY) return
       if (w%aircraft%held(aircraft) /= 0_int32) return
 
+      ! Sequencing acts here, not at the holding point.
+      !
+      ! There is one taxiway and nobody overtakes on it, so the order
+      ! departures push is the order they take off however the queue at the
+      ! threshold is arranged. That is also how ground control really sequences
+      ! departures: by deciding who pushes, not by rearranging aircraft that
+      ! are already lined up.
+      !
+      ! Held aircraft are skipped rather than waited for, or holding the front
+      ! of the queue would stop everything behind it -- which is a hold on the
+      ! airport, not on one aircraft.
+      if (front_of_ready(w, aircraft) /= aircraft) then
+         call sched%push(at=w%now + QUEUE_RETRY_MS, kind=K_PUSHBACKREQUESTED, &
+                         entity=aircraft, generation=w%aircraft%generation(aircraft))
+         return
+      end if
+
       w%aircraft%phase(aircraft) = PHASE_PUSHBACK
       call sched%push(at=w%now + PUSHBACK_MS, kind=K_PUSHBACKCOMPLETE, entity=aircraft, &
                       generation=w%aircraft%generation(aircraft))
@@ -237,6 +267,96 @@ contains
                       payload=int(w%aircraft%gate(aircraft), int64))
    end subroutine pushback_complete
 
+   subroutine commanded_sequence(w, event)
+      !! The player has put a departure at a place in the takeoff queue.
+      !!
+      !! `hold_departure` takes one out of the queue entirely; this reorders
+      !! within it. Both matter, because separation depends on the *pair*: a
+      !! Light behind a Super waits four minutes, and moving it ahead of the
+      !! Super instead costs sixty seconds.
+      type(world_t), intent(inout) :: w
+      type(event_t), intent(in) :: event
+
+      type(command_t) :: command
+      integer(tick_k) :: issued_at
+      integer(id_k) :: aircraft
+
+      call w%commands%get(event%payload, issued_at, command)
+      aircraft = command%a
+      if (.not. known(w, aircraft)) return
+      if (command%b < 0_id_k) return
+
+      w%aircraft%dep_sequence(aircraft) = int(command%b, int32)
+   end subroutine commanded_sequence
+
+   pure function precedes(w, left, right) result(first)
+      !! Whether `left` should be given a takeoff slot before `right`.
+      !!
+      !! Same rule as the landing order: sequenced beats unsequenced, lower
+      !! position beats higher, then longest-waiting, then the handle so the
+      !! order never depends on which event fired first.
+      type(world_t), intent(in) :: w
+      integer(id_k), intent(in) :: left
+         !! Candidate.
+      integer(id_k), intent(in) :: right
+         !! Candidate to compare against.
+      logical :: first
+
+      integer(int32) :: left_seq, right_seq
+
+      left_seq = w%aircraft%dep_sequence(left)
+      right_seq = w%aircraft%dep_sequence(right)
+
+      if ((left_seq > 0_int32) .neqv. (right_seq > 0_int32)) then
+         first = left_seq > 0_int32
+         return
+      end if
+      if (left_seq /= right_seq) then
+         first = left_seq < right_seq
+         return
+      end if
+      if (w%aircraft%ready_tick(left) /= w%aircraft%ready_tick(right)) then
+         first = w%aircraft%ready_tick(left) < w%aircraft%ready_tick(right)
+         return
+      end if
+      first = left < right
+   end function precedes
+
+   pure function front_of_ready(w, asking) result(best)
+      !! The departure that should push next.
+      type(world_t), intent(in) :: w
+      integer(id_k), intent(in) :: asking
+         !! The departure asking to push.
+      integer(id_k) :: best
+
+      integer(default_int) :: i
+
+      best = asking
+      do i = 1_default_int, w%aircraft%size()
+         if (int(i, id_k) == asking) cycle
+         if (w%aircraft%phase(i) /= PHASE_READY) cycle
+         if (w%aircraft%held(i) /= 0_int32) cycle
+         if (precedes(w, int(i, id_k), best)) best = int(i, id_k)
+      end do
+   end function front_of_ready
+
+   pure function front_of_queue(w, asking) result(best)
+      !! The departure that should get the next runway slot.
+      type(world_t), intent(in) :: w
+      integer(id_k), intent(in) :: asking
+         !! The departure whose line-up request is being handled.
+      integer(id_k) :: best
+
+      integer(default_int) :: i
+
+      best = asking
+      do i = 1_default_int, w%aircraft%size()
+         if (int(i, id_k) == asking) cycle
+         if (w%aircraft%phase(i) /= PHASE_LINEUP) cycle
+         if (precedes(w, int(i, id_k), best)) best = int(i, id_k)
+      end do
+   end function front_of_queue
+
    subroutine offer_slot(w, sched, event)
       !! A departure is at the holding point. Work out when it may roll.
       !!
@@ -254,7 +374,7 @@ contains
       type(event_t), intent(in) :: event
 
       integer(id_k) :: aircraft, runway
-      integer(tick_k) :: slot
+      integer(tick_k) :: slot, spacing
 
       aircraft = event%entity
       if (.not. known(w, aircraft)) return
@@ -263,7 +383,32 @@ contains
       runway = 1_id_k
       if (w%n_runways < 1_int32) return
 
-      slot = earliest_slot(w, runway, w%aircraft%wake(aircraft))
+      ! Two independent constraints and a closure. Wake separation says how far
+      ! behind the last movement this one may roll; the declared rate says how
+      ! many movements an hour the airport is willing to release at all. A
+      ! departure waits for whichever binds, and for neither if the runway is
+      ! shut.
+      spacing = rate_spacing_ms(w%dep_rate_per_hour)
+      if (spacing < 0_tick_k .or. w%runway_closed(runway)) then
+         ! Closed. Ask again shortly rather than never: the weather changes,
+         ! and an aircraft that gave up would still be sitting there when it
+         ! did. This is the departures-cannot-push half of the closure
+         ! deadlock, and the stand it is holding is the other half.
+         call sched%push(at=w%now + CLOSED_RETRY_MS, kind=K_LINEUPREQUESTED, &
+                         entity=aircraft, generation=w%aircraft%generation(aircraft))
+         return
+      end if
+
+      ! The slot goes to the front of the queue, which the player may have
+      ! reordered. Anyone else waiting asks again shortly.
+      if (front_of_queue(w, aircraft) /= aircraft) then
+         call sched%push(at=w%now + QUEUE_RETRY_MS, kind=K_LINEUPREQUESTED, &
+                         entity=aircraft, generation=w%aircraft%generation(aircraft))
+         return
+      end if
+
+      slot = max(earliest_slot(w, runway, w%aircraft%wake(aircraft)), &
+                 w%runway_dep_ready_at(runway))
 
       ! Claim the slot now, so the next departure to ask is separated from this
       ! one rather than from whatever last actually rolled. Without it, a queue
@@ -273,6 +418,7 @@ contains
       ! reservation, so this only ever moves it forward.
       w%runway_free_at(runway) = slot
       w%runway_last_wake(runway) = w%aircraft%wake(aircraft)
+      w%runway_dep_ready_at(runway) = slot + spacing
 
       call sched%push(at=slot, kind=K_LINEUPCLEARED, entity=aircraft, &
                       generation=w%aircraft%generation(aircraft), &

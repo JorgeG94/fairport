@@ -5,6 +5,7 @@ target_sources(
           generated/core_event_kinds.f90
           core_event.f90
           core_graph.f90
+          core_reservations.f90
           generated/core_aircraft.f90
           generated/core_command.f90
           core_world.f90
@@ -15,6 +16,7 @@ target_sources(
           core_log.f90
           core_query.f90
           systems/sys_arrival.f90
+          systems/sys_ops_policy.f90
           systems/sys_departure.f90
           systems/sys_gates.f90
           systems/sys_taxi.f90

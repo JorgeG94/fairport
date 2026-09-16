@@ -19,7 +19,7 @@ module app_schedule
    !! expands to the same eighty movements on every compiler. What a bank gives
    !! up is being able to read the timetable off the page, which is why the
    !! pinned form exists alongside it.
-   use core_sim, only: sim_t, tick_k, id_k, HOUR, MINUTE, SECOND, &
+   use core_sim, only: sim_t, tick_k, id_k, HOUR, MINUTE, SECOND, DEFAULT_FUEL_MS, &
                        WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER, &
                        PHASE_APPROACH, CALLSIGN_LEN, STREAM_SCHEDULE
    use app_text, only: int_text
@@ -318,6 +318,7 @@ contains
       sim%world%aircraft%phase(aircraft) = PHASE_APPROACH
       sim%world%aircraft%node(aircraft) = sim%world%runway_threshold(runway)
       sim%world%aircraft%generation(aircraft) = 1_int32
+      sim%world%aircraft%fuel_ms(aircraft) = DEFAULT_FUEL_MS
 
       call sim%schedule_touchdown(aircraft, runway, at, err)
    end subroutine add_arrival

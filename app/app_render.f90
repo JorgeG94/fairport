@@ -11,7 +11,7 @@ module app_render
    !! verbosity are separable and a future interactive frame can silence the
    !! console without losing the log.
    use core_sim, only: sim_t, aircraft_view_t, gate_view_t, query_aircraft, query_gates, &
-                       tick_k, id_k, NO_ID, phase_name, wake_letter
+                       tick_k, id_k, NO_ID, phase_name, wake_letter, PHASE_DIVERTED
    use app_text, only: int_text, pad_left, pad_right, clock_text, duration_text
    use pic_types, only: default_int, int32, int64
    use pic_logger, only: logger => global_logger
@@ -79,21 +79,33 @@ contains
          !! Simulation to report on.
 
       type(aircraft_view_t) :: aircraft(MAX_VIEWS)
-      integer(default_int) :: n_aircraft, i, parked, departed
-      integer(int64) :: total_taxi, total_delay, worst_delay
+      integer(default_int) :: n_aircraft, i, parked, departed, diverted, held_total
+      integer(int64) :: total_taxi, total_delay, worst_delay, total_stand_wait, worst_stand_wait
 
       call query_aircraft(sim%world, aircraft, n_aircraft)
 
       parked = 0_default_int
       departed = 0_default_int
+      diverted = 0_default_int
+      held_total = 0_default_int
       total_taxi = 0_int64
       total_delay = 0_int64
       worst_delay = 0_int64
+      total_stand_wait = 0_int64
+      worst_stand_wait = 0_int64
       do i = 1_default_int, n_aircraft
          if (aircraft(i)%on_blocks_tick > 0_tick_k) then
             parked = parked + 1_default_int
-            total_taxi = total_taxi + (aircraft(i)%on_blocks_tick - aircraft(i)%touchdown_tick)
+            ! Taxi time is what is left once the wait for a stand is taken
+            ! out. The two are different failures and averaging them together
+            ! says nothing about either.
+            total_taxi = total_taxi + (aircraft(i)%on_blocks_tick - aircraft(i)%touchdown_tick) &
+                         - aircraft(i)%stand_wait_ms
+            total_stand_wait = total_stand_wait + aircraft(i)%stand_wait_ms
+            worst_stand_wait = max(worst_stand_wait, aircraft(i)%stand_wait_ms)
          end if
+         if (aircraft(i)%phase == PHASE_DIVERTED) diverted = diverted + 1_default_int
+         held_total = held_total + int(aircraft(i)%holds, default_int)
          if (aircraft(i)%airborne_tick > 0_tick_k) then
             departed = departed + 1_default_int
             total_delay = total_delay + aircraft(i)%delay_ms
@@ -107,8 +119,14 @@ contains
       call logger%info("  aircraft          "//int_text(int(n_aircraft, int64)))
       call logger%info("  parked            "//int_text(int(parked, int64)))
       call logger%info("  departed          "//int_text(int(departed, int64)))
+      ! Diversions are the hard failure. Delay minutes are a score you can
+      ! argue about; an aircraft that went somewhere else is not.
+      call logger%info("  DIVERTED          "//int_text(int(diverted, int64)))
+      call logger%info("  holding circuits  "//int_text(int(held_total, int64)))
       if (parked > 0_default_int) then
-         call logger%info("  mean gate-in      "//duration_text(total_taxi/int(parked, int64)))
+         call logger%info("  mean taxi-in      "//duration_text(total_taxi/int(parked, int64)))
+         call logger%info("  mean stand wait   "//duration_text(total_stand_wait/int(parked, int64)))
+         call logger%info("  worst stand wait  "//duration_text(worst_stand_wait))
       end if
       if (departed > 0_default_int) then
          ! Total delay minutes is the milestone 1 score. Mean and worst say

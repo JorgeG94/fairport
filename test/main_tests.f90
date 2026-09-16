@@ -8,6 +8,7 @@ program fairport_tester
                         select_suite, run_selected, get_argument
    use pic_types, only: int32
    use test_core_graph, only: collect_core_graph_tests
+   use test_core_reservations, only: collect_core_reservations_tests
    use test_core_scheduler, only: collect_core_scheduler_tests
    use test_core_bus, only: collect_core_bus_tests
    use test_core_aircraft, only: collect_core_aircraft_tests
@@ -15,6 +16,8 @@ program fairport_tester
    use test_core_time, only: collect_core_time_tests
    use test_sys_arrival, only: collect_sys_arrival_tests
    use test_sys_departure, only: collect_sys_departure_tests
+   use test_sys_ops_policy, only: collect_sys_ops_policy_tests
+   use test_sequencing, only: collect_sequencing_tests
    use test_core_determinism, only: collect_core_determinism_tests
    use test_app_text, only: collect_app_text_tests
    use test_app_loader, only: collect_app_loader_tests
@@ -30,9 +33,10 @@ program fairport_tester
 
    ! Allocated first and assigned second: some compilers object to allocating
    ! on the fly from an array constructor of derived types.
-   allocate (testsuites(12))
+   allocate (testsuites(15))
    testsuites = [ &
                 new_testsuite("core_graph", collect_core_graph_tests), &
+                new_testsuite("core_reservations", collect_core_reservations_tests), &
                 new_testsuite("core_scheduler", collect_core_scheduler_tests), &
                 new_testsuite("core_bus", collect_core_bus_tests), &
                 new_testsuite("core_aircraft", collect_core_aircraft_tests), &
@@ -40,6 +44,8 @@ program fairport_tester
                 new_testsuite("core_time", collect_core_time_tests), &
                 new_testsuite("sys_arrival", collect_sys_arrival_tests), &
                 new_testsuite("sys_departure", collect_sys_departure_tests), &
+                new_testsuite("sys_ops_policy", collect_sys_ops_policy_tests), &
+                new_testsuite("sequencing", collect_sequencing_tests), &
                 new_testsuite("core_determinism", collect_core_determinism_tests), &
                 new_testsuite("app_text", collect_app_text_tests), &
                 new_testsuite("app_loader", collect_app_loader_tests), &

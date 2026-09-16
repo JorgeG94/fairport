@@ -104,6 +104,14 @@ contains
       w%aircraft%gate(aircraft) = gate
       w%aircraft%goal(aircraft) = w%gate_node(gate)
 
+      ! Everything between vacating the runway and being given a stand is time
+      ! the airport cost this aircraft, and it is not taxi time. Averaging the
+      ! two together turned a three-minute taxi and a five-hour wait into one
+      ! meaningless "forty-four minutes".
+      if (w%aircraft%exited_tick(aircraft) > 0_tick_k) then
+         w%aircraft%stand_wait_ms(aircraft) = max(0_tick_k, w%now - w%aircraft%exited_tick(aircraft))
+      end if
+
       call sched%push(at=w%now, kind=K_GATEASSIGNED, entity=aircraft, &
                       generation=w%aircraft%generation(aircraft), &
                       payload=int(gate, int64))
@@ -145,6 +153,14 @@ contains
       w%gate_occupant(gate) = aircraft
       w%aircraft%gate(aircraft) = gate
       w%aircraft%goal(aircraft) = w%gate_node(gate)
+
+      ! Everything between vacating the runway and being given a stand is time
+      ! the airport cost this aircraft, and it is not taxi time. Averaging the
+      ! two together turned a three-minute taxi and a five-hour wait into one
+      ! meaningless "forty-four minutes".
+      if (w%aircraft%exited_tick(aircraft) > 0_tick_k) then
+         w%aircraft%stand_wait_ms(aircraft) = max(0_tick_k, w%now - w%aircraft%exited_tick(aircraft))
+      end if
 
       call sched%push(at=w%now, kind=K_GATEASSIGNED, entity=aircraft, &
                       generation=w%aircraft%generation(aircraft), &

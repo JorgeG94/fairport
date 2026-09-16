@@ -56,6 +56,8 @@ module core_event_kinds
       !! An incident has fired.
    integer(int16), parameter, public :: K_LINEUPREQUESTED = 19_int16
       !! A departure is at the holding point.
+   integer(int16), parameter, public :: K_APPROACHREQUESTED = 20_int16
+      !! An arrival wants a landing clearance.
    integer(int16), parameter, public :: K_PASSENGERENTEREDCONCOURSE = 40_int16
       !! Landside, milestone 3.
    integer(int16), parameter, public :: K_PASSENGEREXITEDARRIVALS = 41_int16
@@ -85,13 +87,15 @@ module core_event_kinds
       !! Player command: Return a runway to use.
    integer(int16), parameter, public :: K_CMD_SET_ARRIVAL_RATE = 67_int16
       !! Player command: Set the declared arrival rate, per hour.
+   integer(int16), parameter, public :: K_CMD_SET_VISIBILITY = 68_int16
+      !! Player command: Report a new visibility, in metres.
 
-   integer, parameter :: MAX_EVENT_KIND = 67
+   integer, parameter :: MAX_EVENT_KIND = 68
       !! Largest identifier in use, and therefore the upper bound of the bus
       !! dispatch table. Default integer kind on purpose: it is an array bound,
       !! not simulation state. Recomputed by fypp whenever the list grows.
 
-   integer, parameter :: N_EVENT_KINDS = 33
+   integer, parameter :: N_EVENT_KINDS = 35
       !! How many kinds are declared, which is not `MAX_EVENT_KIND` because the
       !! numbering leaves gaps between sections.
 
@@ -146,6 +150,8 @@ contains
          name = "IncidentTriggered"
       case (19_int16)
          name = "LineUpRequested"
+      case (20_int16)
+         name = "ApproachRequested"
       case (40_int16)
          name = "PassengerEnteredConcourse"
       case (41_int16)
@@ -174,6 +180,8 @@ contains
          name = "CmdOpenRunway"
       case (67_int16)
          name = "CmdSetArrivalRate"
+      case (68_int16)
+         name = "CmdSetVisibility"
       case default
          name = "Unknown"
       end select

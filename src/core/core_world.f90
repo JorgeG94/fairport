@@ -13,19 +13,42 @@ module core_world
    use core_aircraft, only: aircraft_soa_t
    use core_command, only: command_log_t
    use core_graph, only: taxi_graph_t
+   use core_reservations, only: reservation_pool_t
    use pic_types, only: default_int
    use pic_error, only: error_t, error_raise, ERROR_ALLOC, ERROR_VALIDATION
    implicit none
    private
 
    public :: world_t
-   public :: CALLSIGN_LEN
+   public :: CALLSIGN_LEN, DEFAULT_FUEL_MS
    public :: PHASE_INBOUND, PHASE_APPROACH, PHASE_LANDING, PHASE_ROLLOUT
    public :: PHASE_TAXI_IN, PHASE_AT_GATE, PHASE_DIVERTED
    public :: PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT
-   public :: PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED
+   public :: PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED, PHASE_HOLDING
    public :: WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    public :: phase_name, wake_letter
+   public :: APRON_BUFFER
+
+   integer(tick_k), parameter :: DEFAULT_FUEL_MS = 45_tick_k*60000_tick_k
+      !! Holding endurance an arrival carries unless the schedule says
+      !! otherwise: forty-five minutes. Long enough that an ordinary busy
+      !! period never diverts anybody, short enough that a two-hour closure
+      !! does.
+
+   integer(int32), parameter :: APRON_BUFFER = 2_int32
+      !! How many landed aircraft the airport will hold on its taxiways with
+      !! nowhere to park before it stops accepting more.
+      !!
+      !! Not zero: a couple of aircraft waiting a few minutes for a stand to
+      !! free is ordinary, and refusing every arrival the instant the stands
+      !! are full would make the airport far more brittle than a real one.
+      !!
+      !! Not unbounded either, which is what it was. An aircraft that has
+      !! landed is occupying the runway exit, and twenty of them queued there
+      !! is not a busy airport, it is a broken model -- one run had an A380
+      !! sitting on the exit for five hours. The queue belongs in the air,
+      !! where it costs fuel and can end in a diversion, and where the design
+      !! document puts it.
 
    integer, parameter :: CALLSIGN_LEN = 8
       !! Width of a callsign. Fixed, so the array is contiguous and a
@@ -49,6 +72,7 @@ module core_world
    integer(int32), parameter :: PHASE_LINEUP = 11_int32
    integer(int32), parameter :: PHASE_TAKEOFF = 12_int32
    integer(int32), parameter :: PHASE_DEPARTED = 13_int32
+   integer(int32), parameter :: PHASE_HOLDING = 14_int32
 
    ! Wake turbulence categories. The numbering is the index into the
    ! separation matrix, so it must stay dense and ascending by size.
@@ -91,6 +115,14 @@ module core_world
          !! Earliest sim time each runway is available again.
       integer(int32), allocatable :: runway_last_wake(:)
          !! Wake category of the last movement, for separation.
+      integer(tick_k), allocatable :: runway_dep_ready_at(:)
+         !! Earliest the declared departure rate permits another departure.
+         !! Separate from `runway_free_at`, which is wake separation: the two
+         !! are independent constraints and a movement waits for both.
+      integer(tick_k), allocatable :: runway_arr_ready_at(:)
+         !! Earliest the declared arrival rate permits another landing.
+      logical, allocatable :: runway_closed(:)
+         !! Whether the player has taken this runway out of use.
       character(len=CALLSIGN_LEN), allocatable :: runway_name(:)
          !! Runway designator, for the ops board.
       integer(int32) :: n_runways = 0_int32
@@ -118,12 +150,18 @@ module core_world
          !! so that a handler resolving a command's payload index can reach it
          !! through the world it is already given.
 
+      type(reservation_pool_t) :: reservations
+         !! Who holds which taxiway node, and when. Sized at load from the
+         !! aircraft capacity and the longest route, so ground movement
+         !! allocates nothing during a run.
+
       type(taxi_graph_t) :: graph
          !! Static taxiway topology.
    contains
       procedure :: reserve => world_reserve
       procedure :: free_gate_for => world_free_gate_for
       procedure :: has_stand_for => world_has_stand_for
+      procedure :: unstanded => world_unstanded
       procedure :: destroy => world_destroy
    end type world_t
 
@@ -164,7 +202,8 @@ contains
                 this%gate_max_wake(n_gates), this%gate_name(n_gates), &
                 this%runway_threshold(n_runways), this%runway_exit(n_runways), &
                 this%runway_free_at(n_runways), this%runway_last_wake(n_runways), &
-                this%runway_name(n_runways), stat=status)
+                this%runway_dep_ready_at(n_runways), this%runway_arr_ready_at(n_runways), &
+                this%runway_closed(n_runways), this%runway_name(n_runways), stat=status)
       if (status /= 0) then
          call error_raise(err, ERROR_ALLOC, "world_reserve: allocation failed")
          return
@@ -179,6 +218,9 @@ contains
       this%runway_exit = NO_ID
       this%runway_free_at = 0_tick_k
       this%runway_last_wake = WAKE_MEDIUM
+      this%runway_dep_ready_at = 0_tick_k
+      this%runway_arr_ready_at = 0_tick_k
+      this%runway_closed = .false.
       this%runway_name = ""
       this%n_gates = n_gates
       this%n_runways = n_runways
@@ -217,6 +259,24 @@ contains
       end do
    end function world_free_gate_for
 
+   pure function world_unstanded(this) result(n)
+      !! Aircraft that have landed, have nowhere to park, and are still on the
+      !! ground waiting for somewhere.
+      class(world_t), intent(in) :: this
+      integer(int32) :: n
+
+      integer(default_int) :: i
+
+      n = 0_int32
+      do i = 1_default_int, this%aircraft%size()
+         if (this%aircraft%touchdown_tick(i) == 0_tick_k) cycle
+         if (this%aircraft%on_blocks_tick(i) /= 0_tick_k) cycle
+         if (this%aircraft%gate(i) /= NO_ID) cycle
+         if (this%aircraft%phase(i) == PHASE_DIVERTED) cycle
+         n = n + 1_int32
+      end do
+   end function world_unstanded
+
    pure function world_has_stand_for(this, wake) result(exists)
       !! Whether any stand at all could take this wake category, free or not.
       !!
@@ -253,6 +313,9 @@ contains
       if (allocated(this%runway_exit)) deallocate (this%runway_exit)
       if (allocated(this%runway_free_at)) deallocate (this%runway_free_at)
       if (allocated(this%runway_last_wake)) deallocate (this%runway_last_wake)
+      if (allocated(this%runway_dep_ready_at)) deallocate (this%runway_dep_ready_at)
+      if (allocated(this%runway_arr_ready_at)) deallocate (this%runway_arr_ready_at)
+      if (allocated(this%runway_closed)) deallocate (this%runway_closed)
       if (allocated(this%runway_name)) deallocate (this%runway_name)
       this%n_gates = 0_int32
       this%n_runways = 0_int32
@@ -264,6 +327,7 @@ contains
 
       call this%aircraft%destroy()
       call this%commands%destroy()
+      call this%reservations%destroy()
       call this%graph%destroy()
       call destroy_arrays(this)
       this%now = 0_tick_k
@@ -304,6 +368,8 @@ contains
          name = "takeoff"
       case (PHASE_DEPARTED)
          name = "departed"
+      case (PHASE_HOLDING)
+         name = "holding"
       case default
          name = "unknown"
       end select

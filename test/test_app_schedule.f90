@@ -18,6 +18,10 @@ module test_app_schedule
 
    public :: collect_app_schedule_tests
 
+   integer, parameter :: N_STANDS = 12
+      !! Stands in the fixture airport. More than any test lands, so that no
+      !! arrival is ever refused a clearance for want of somewhere to park.
+
    character(len=*), parameter :: AIRPORT_PATH = "test_schedule_airport.txt"
    character(len=*), parameter :: SCHEDULE_PATH = "test_schedule.toml"
 
@@ -89,30 +93,53 @@ contains
    end subroutine discard
 
    subroutine with_airport(sim, seed, err)
-      !! A seeded simulation with a tiny two-stand airport loaded.
+      !! A seeded simulation with an airport that has room for everybody.
       !!
       !! `init` is part of the fixture on purpose. Without it the bus has no
       !! subscriptions, so nothing dispatches, every `touchdown_tick` stays
       !! zero, and a test comparing them passes or fails for reasons that have
       !! nothing to do with the schedule.
+      !!
+      !! Twelve stands, which is more than any fixture here lands. That is
+      !! deliberate: since the apron buffer arrived, an arrival with nowhere to
+      !! park is refused its clearance and holds, so a cramped airport would
+      !! push `touchdown_tick` outside the bank's window and these tests would
+      !! start measuring contention instead of the loader.
       type(sim_t), target, intent(inout) :: sim
       integer(int64), intent(in) :: seed
          !! Master seed.
       type(error_t), intent(inout) :: err
 
+      ! Two runway nodes, one stand node each, one runway edge, one edge and
+      ! one gate directive per stand, and the runway. Sized exactly, because
+      ! one short is a segfault rather than a compile error.
+      character(len=64) :: lines(4 + 3*N_STANDS)
+      integer :: i, at
+
       call sim%init(seed, err)
 
-      call write_lines(AIRPORT_PATH, [character(len=64) :: &
-                                      "node runway_threshold 0 0 S", &
-                                      "node runway_exit 1000 0 S", &
-                                      "node gate 2000 0 S", &
-                                      "node gate 3000 0 S", &
-                                      "edge 1 2 30000", &
-                                      "edge 2 3 40000", &
-                                      "edge 2 4 45000", &
-                                      "gate A1 3 S", &
-                                      "gate A2 4 S", &
-                                      "runway 09 1 2"])
+      lines(1) = "node runway_threshold 0 0 S"
+      lines(2) = "node runway_exit 1000 0 S"
+      at = 2
+      do i = 1, N_STANDS
+         at = at + 1
+         write (lines(at), "(a,i0,a)") "node gate ", 2000 + 100*i, " 0 S"
+      end do
+      at = at + 1
+      lines(at) = "edge 1 2 30000"
+      do i = 1, N_STANDS
+         at = at + 1
+         write (lines(at), "(a,i0,a)") "edge 2 ", 2 + i, " 40000"
+      end do
+      ! Stands and the runway come after every node the file refers to.
+      do i = 1, N_STANDS
+         at = at + 1
+         write (lines(at), "(a,i0,a,i0,a)") "gate S", i, " ", 2 + i, " S"
+      end do
+      at = at + 1
+      lines(at) = "runway 09 1 2"
+
+      call write_lines(AIRPORT_PATH, lines(1:at))
       call load_airport(sim, AIRPORT_PATH, 256_default_int, err)
    end subroutine with_airport
 

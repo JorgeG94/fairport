@@ -53,6 +53,8 @@ contains
 
       call sim%world%graph%build(3_int32, [1_id_k, 2_id_k], [2_id_k, 3_id_k], &
                                  [30000_int32, 40000_int32], err)
+      call sim%world%reservations%reserve_pool(3_int32, &
+                                               64_default_int*sim%world%aircraft%capacity(), err)
       allocate (sim%world%graph%x_cm(3), sim%world%graph%y_cm(3))
       sim%world%graph%x_cm = 0_int32
       sim%world%graph%y_cm = 0_int32

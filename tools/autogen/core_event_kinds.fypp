@@ -41,6 +41,7 @@
   ('ReplanRequested',          17, 'A route must be recomputed.'),            &
   ('IncidentTriggered',        18, 'An incident has fired.'),                 &
   ('LineUpRequested',          19, 'A departure is at the holding point.'),   &
+  ('ApproachRequested',        20, 'An arrival wants a landing clearance.'),  &
   ('PassengerEnteredConcourse',40, 'Landside, milestone 3.'),                 &
   ('PassengerExitedArrivals',  41, 'Landside, milestone 3.'),                 &
   ('PurchaseMade',             42, 'Landside, milestone 3.'),                 &

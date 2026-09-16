@@ -15,15 +15,19 @@
   aircraft          4
   parked            4
   departed          4
-  mean gate-in      2m41s
+  DIVERTED          0
+  holding circuits  0
+  mean taxi-in      2m41s
+  mean stand wait   0m00s
+  worst stand wait  0m00s
   mean dep delay    4m41s
   worst dep delay   4m54s
   total dep delay   18 min
-  events dispatched 82
+  events dispatched 86
   events tombstoned 0
-  events scheduled  82
+  events scheduled  86
   commands issued   0
   command log hash  a8c7f832281a39c5
-  event log hash    b59b286e6002af34
+  event log hash    6f7de7d42ac76c91
   seed              42
 

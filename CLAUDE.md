@@ -175,8 +175,121 @@ Done:
   the runway queue and takeoff. `WAKE_SEP_SEC` finally has a caller, and
   `hold_departure` / `release_departure` are the player's lever on it.
 
-Next, in order: weather and ops policy, fuel and diversion, the reservation
-table, and the interactive terminal last.
+- **Weather, capacity, holding and diversion.** `sys_ops_policy` turns
+  visibility into two integers; arrivals that cannot be cleared hold, burn
+  fuel, and divert at bingo. `scenarios/fog_bank.txt` is the design's own
+  scenario: the same traffic as `full_day.txt` with two hours of fog diverts
+  fourteen aircraft instead of none.
+
+- **Sequencing.** `sequence_arrival` and `sequence_departure` reorder the
+  landing stack and the takeoff queue. With holding scarce, this is how the
+  player chooses *who* diverts.
+
+- **The schedule at the design's scale.** Forty arrivals, which is eighty
+  movements once each leaves again.
+
+- **The reservation table** (`core_reservations`). A flat pool with an
+  intrusive list per node and a free list through the same `next` array. No
+  allocation after load, no generic container, and the iteration order over a
+  node is a function of insertion order alone.
+
+**That completes milestone 1 except the interactive terminal.**
+
+### An aircraft commits to a route it can complete, or waits
+
+`sys_taxi` checks every node on a planned route against the window it would
+need, and either claims the whole thing or asks again in forty-five seconds.
+Replanning around the conflict is deliberately not attempted: the taxi solver is
+meant to be mediocre, and the player is the optimizer.
+
+Windows are half-open. An aircraft leaving a node at the instant the next
+arrives is a handover, not a conflict, and treating it as one deadlocks an apron
+with a single entrance.
+
+### Departure sequencing acts at pushback, not at the holding point
+
+Reservations made this necessary and obvious: there is one taxiway, nobody
+overtakes on it, so the order departures push is the order they take off
+whatever the queue at the threshold looks like. That is also how ground control
+really sequences departures. Held aircraft are skipped rather than waited for,
+or holding the front of the queue would stop everything behind it.
+
+### `size` of an unallocated array is undefined, not zero
+
+Guarding the reservation pool with a bounds check alone segfaulted four test
+fixtures that never sized it. An unsized pool now constrains nothing, which is
+exactly the behaviour before reservations existed.
+
+### "~80 movements" counts departures too
+
+Forty arrivals is eighty movements, not eighty arrivals. Reading it the other
+way put a hundred and sixty movements through a six-stand airport and diverted
+twenty-four aircraft.
+
+What matters more than the count is the shape. Forty arrivals spread evenly
+across a day is a trickle six stands absorb without complaint, and nothing
+interesting happens -- zero diversions. Concentrated into two banks it is a
+wave, and four aircraft run out of holding fuel. The bank windows are the
+tuning knob for how hard the day is, not the movement count.
+
+### A controller grants the slot; aircraft only ask
+
+The first sequencing implementation made the asking aircraft defer when it was
+not at the front. That wasted the clearance, because the front aircraft would
+not ask again for a full holding circuit -- costing two extra diversions and
+doubling the holding on a busy day. `sys_arrival` now hands the clearance to the
+front of the stack directly. `a_clearance_is_never_wasted` asserts the property.
+
+The order is: sequenced beats unsequenced, lower position beats higher, then
+longest-waiting, then the handle. The longest-waiting rule is what stops the
+unsequenced majority starving while the player attends to two aircraft.
+
+### "Can it be taken" is asked per aircraft, never per request
+
+The stand check used to be asked for whoever requested the clearance, which then
+went to whoever was at the front -- so a free Medium stand could clear a Super.
+An aircraft no stand on the field could ever take is refused outright, whatever
+the apron buffer says.
+
+### You can only sequence what is already in the queue
+
+A slot cannot be kept warm for an aircraft that has not arrived. Three
+sequencing tests initially failed for this reason, and the fixtures now close
+the airport, or hold the departures, until everybody is actually waiting.
+
+### Capacity is two integers, never a boolean
+
+"Closed" is those integers at zero. Every partial state -- arrivals only,
+departures only, low-visibility procedures -- falls out of the same arithmetic
+with no extra branch. A rate becomes a minimum spacing, which a runway honours
+*alongside* wake separation: they are independent constraints and a movement
+waits for `max(separation, rate spacing)`. Both are integer; `(x*4)/5`, never
+`x*0.8`.
+
+### A queue belongs in the air, not on the taxiway
+
+An arrival with nowhere to park is refused its clearance and holds, once more
+than `APRON_BUFFER` aircraft are already on the ground waiting for a stand.
+Without that bound the model quietly absorbed unlimited traffic: one run had an
+A380 sitting on the runway exit for five hours, and the only visible symptom was
+a "mean gate-in" of forty-four minutes that averaged a three-minute taxi with a
+five-hour wait.
+
+Holding costs fuel and can end in a diversion, so over-scheduling now produces a
+hard failure you can see rather than an invisible ground queue. Fifty-two
+movements against six stands diverts six aircraft on a clear day, which is
+roughly what the design's milestone 1 success criterion asks for.
+
+Taxi time and stand wait are reported separately, for the same reason: they are
+different failures and their average means nothing.
+
+### One scheduled event per aircraft, never a poll
+
+Bingo fuel is scheduled once when an aircraft enters the hold, and landing
+bumps its generation so the pending timer is tombstoned. Nothing polls fuel.
+Diversions then emerge in fuel order on their own. `landing_cancels_the_bingo_timer`
+is the test that would catch the missing increment -- without it an aircraft
+parks, turns round, and diverts from its stand.
 
 ### `runway_free_at` only ever moves forward
 

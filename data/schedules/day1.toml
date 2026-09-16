@@ -50,18 +50,26 @@ at = "07:04"
 runway = 1
 
 # ----------------------------------------------------------------- banks ----
-# The morning wave is the heavy one: long-haul arrives early, and the Super
-# stand is contended. The evening wave is lighter and mostly domestic.
+# Forty arrivals, which is eighty movements once each one leaves again -- the
+# figure the design document gives for milestone 1.
 #
-# Six stands against these counts is deliberately not enough. Watching where
-# the queue forms is the point of the milestone.
+# The windows are tight on purpose. Forty arrivals spread evenly across a day
+# is a trickle that six stands absorb without complaint, and nothing
+# interesting ever happens. Concentrated into two banks it is a wave, the
+# stands fill, the stack builds, and a handful of aircraft run out of holding
+# fuel. On this seed four of them do, which is about what the design's success
+# criterion describes: a run where nothing was obviously done wrong still ends
+# in diversions.
+#
+# The morning wave is the heavy one, with the long-haul in it and the only
+# Super stand contended. The evening wave is lighter and mostly domestic.
 
 [[bank]]
 kind = "arrival"
 prefix = "MOR"
 from = "07:10"
-to = "09:30"
-count = 26
+to = "08:30"
+count = 20
 runway = 1
 wake_mix = [1, 7, 3, 1]
 
@@ -69,7 +77,7 @@ wake_mix = [1, 7, 3, 1]
 kind = "arrival"
 prefix = "EVE"
 from = "17:00"
-to = "19:45"
-count = 22
+to = "18:45"
+count = 16
 runway = 1
 wake_mix = [2, 9, 2, 0]

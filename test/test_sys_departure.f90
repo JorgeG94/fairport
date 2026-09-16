@@ -19,6 +19,7 @@ module test_sys_departure
                        WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER, &
                        PHASE_APPROACH, PHASE_AT_GATE, PHASE_READY, PHASE_DEPARTED
    use sys_arrival, only: WAKE_SEP_SEC
+   use sys_ops_policy, only: rate_spacing_ms
    use pic_error, only: error_t
    use pic_types, only: default_int
    implicit none
@@ -43,7 +44,7 @@ contains
                   new_unittest("an_arrival_becomes_a_departure", test_round_trip), &
                   new_unittest("the_stand_is_given_back", test_stand_released), &
                   new_unittest("separation_is_never_violated", test_separation), &
-                  new_unittest("separation_actually_binds", test_separation_binds), &
+                  new_unittest("spacing_is_separation_or_rate", test_separation_binds), &
                   new_unittest("a_hold_keeps_it_on_stand", test_hold), &
                   new_unittest("a_release_lets_it_go", test_release), &
                   new_unittest("delay_is_ready_to_airborne", test_delay) &
@@ -96,6 +97,8 @@ contains
 
       do i = 1_int32, int(size(wakes), int32)
          call sim%world%aircraft%add(aircraft, err)
+         call sim%world%reservations%reserve_pool(n_nodes, &
+                                                  64_default_int*sim%world%aircraft%capacity(), err)
          sim%world%callsign(aircraft) = "T"
          sim%world%aircraft%wake(aircraft) = wakes(i)
          sim%world%aircraft%phase(aircraft) = PHASE_APPROACH
@@ -200,9 +203,16 @@ contains
       !! hold every departure through its turnaround, release them all at one
       !! instant, and they arrive at the holding point together.
       !!
-      !! With six Mediums that is six aircraft wanting the same slot, and the
-      !! matrix hands them out sixty seconds apart. If separation were not
-      !! binding they would all roll at once.
+      !! With six Mediums that is six aircraft wanting the same instant, and
+      !! they come out spaced by whichever constraint binds harder:
+      !!
+      !! - wake separation, sixty seconds for a Medium behind a Medium;
+      !! - the declared departure rate, thirty an hour, which is one every two
+      !!   minutes.
+      !!
+      !! So the gap is `max(separation, rate spacing)` -- here the rate, and
+      !! the test says so rather than hard-coding the number, because the
+      !! point is that both constraints are applied and neither is ignored.
       type(error_type), allocatable, intent(out) :: error
 
       type(sim_t), target :: sim
@@ -210,7 +220,7 @@ contains
       integer(default_int) :: i, earlier, later
       integer(tick_k) :: gap
       integer(int32) :: order(N_FLEET), aircraft
-      integer(tick_k), parameter :: MEDIUM_SEPARATION = 60_tick_k*SECOND
+      integer(tick_k) :: expected
 
       call build(sim, 42_int64, [WAKE_MEDIUM, WAKE_MEDIUM, WAKE_MEDIUM, &
                                  WAKE_MEDIUM, WAKE_MEDIUM, WAKE_MEDIUM], err)
@@ -246,13 +256,17 @@ contains
 
          gap = sim%world%aircraft%airborne_tick(later) - sim%world%aircraft%airborne_tick(earlier)
 
-         call check(error, gap >= MEDIUM_SEPARATION, &
-                    "six departures released together were not separated")
+         expected = max(int(WAKE_SEP_SEC(sim%world%aircraft%wake(earlier), &
+                                         sim%world%aircraft%wake(later)), tick_k)*SECOND, &
+                        rate_spacing_ms(sim%world%dep_rate_per_hour))
+
+         call check(error, gap >= expected, &
+                    "six departures released together were not spaced by either constraint")
          if (allocated(error)) return
-         ! And not merely separated -- separated by exactly what the matrix
-         ! says, which is what proves the number came from the matrix.
-         call check(error, gap == MEDIUM_SEPARATION, &
-                    "the gap was not the separation the matrix specifies")
+         ! And spaced by exactly the binding constraint, not merely by more
+         ! than it -- which is what proves the number came from the model.
+         call check(error, gap == expected, &
+                    "the gap was neither the separation nor the declared rate")
          if (allocated(error)) return
       end do
 

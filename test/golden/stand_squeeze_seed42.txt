@@ -4,7 +4,7 @@
  #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY
   1  QFA412    H     departed      --  06:45:00  06:47:33  07:53:35   4m43s
   2  VOZ881    M     departed      --  06:52:00  06:54:19  07:33:49   4m17s
-  3  UAE414    S     at_gate       A1  06:58:00  07:52:43  --:--:--       -
+  3  UAE414    S     at_gate       A1  06:58:00  07:54:58  --:--:--       -
   4  JST615    M     departed      --  07:04:00  07:06:53  07:47:12   4m54s
 
  GATES  A1[UAE414] A2[------] A3[------] B1[------] B2[------] B3[------]
@@ -15,15 +15,19 @@
   aircraft          4
   parked            4
   departed          3
-  mean gate-in      15m37s
+  DIVERTED          0
+  holding circuits  0
+  mean taxi-in      3m11s
+  mean stand wait   13m00s
+  worst stand wait  52m00s
   mean dep delay    4m38s
   worst dep delay   4m54s
   total dep delay   13 min
-  events dispatched 123
+  events dispatched 130
   events tombstoned 0
-  events scheduled  124
+  events scheduled  131
   commands issued   1
   command log hash  9d36ae4707e99e2c
-  event log hash    2e5da75d862be059
+  event log hash    5f92c82e8fb5e8fd
   seed              42
 

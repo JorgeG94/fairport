@@ -49,6 +49,10 @@ module core_query
          !! Ready to airborne: every minute the airfield cost this departure.
       integer(int32) :: held = 0_int32
          !! Non-zero while the player is holding it on its stand.
+      integer(int32) :: holds = 0_int32
+         !! Holding circuits flown waiting for a landing clearance.
+      integer(tick_k) :: stand_wait_ms = 0_tick_k
+         !! Time on the ground with nowhere to park.
    end type aircraft_view_t
 
    type :: gate_view_t
@@ -93,6 +97,8 @@ contains
          out(i)%airborne_tick = w%aircraft%airborne_tick(i)
          out(i)%delay_ms = w%aircraft%delay_ms(i)
          out(i)%held = w%aircraft%held(i)
+         out(i)%holds = w%aircraft%holds(i)
+         out(i)%stand_wait_ms = w%aircraft%stand_wait_ms(i)
       end do
    end subroutine query_aircraft
 

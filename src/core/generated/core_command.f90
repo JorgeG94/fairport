@@ -47,7 +47,7 @@ module core_command
    integer(int16), parameter :: COMMAND_ID_MAX = 79_int16
       !! Last identifier reserved for commands. `core_event_kinds` must not use
       !! anything in this range for a non-command event.
-   integer, parameter :: N_COMMANDS = 8
+   integer, parameter :: N_COMMANDS = 9
       !! Commands declared.
 
    integer(default_int), parameter :: INITIAL_CAPACITY = 64_default_int
@@ -120,6 +120,8 @@ contains
          name = "open_runway"
       case (67_int16)
          name = "set_arrival_rate"
+      case (68_int16)
+         name = "set_visibility"
       case default
          name = "unknown"
       end select
@@ -152,6 +154,8 @@ contains
          kind = 66_int16
       case ("set_arrival_rate")
          kind = 67_int16
+      case ("set_visibility")
+         kind = 68_int16
       case default
          kind = 0_int16
       end select
@@ -179,6 +183,8 @@ contains
       case (66_int16)
          n_args = 1_int32
       case (67_int16)
+         n_args = 1_int32
+      case (68_int16)
          n_args = 1_int32
       case default
          n_args = 0_int32

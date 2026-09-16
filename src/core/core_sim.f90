@@ -19,7 +19,11 @@ module core_sim
                                K_REPLANREQUESTED, K_CMD_ASSIGN_GATE, event_name, &
                                K_TURNAROUNDCOMPLETE, K_PUSHBACKREQUESTED, K_PUSHBACKCOMPLETE, &
                                K_GATERELEASED, K_LINEUPREQUESTED, K_LINEUPCLEARED, &
-                               K_TAKEOFFROLLCOMPLETE, K_CMD_HOLD_DEPARTURE, K_CMD_RELEASE_DEPARTURE
+                               K_TAKEOFFROLLCOMPLETE, K_CMD_HOLD_DEPARTURE, K_CMD_RELEASE_DEPARTURE, &
+                               K_WEATHERCHANGED, K_CMD_SET_VISIBILITY, K_CMD_SET_ARRIVAL_RATE, &
+                               K_CMD_CLOSE_RUNWAY, K_CMD_OPEN_RUNWAY, &
+                               K_APPROACHREQUESTED, K_BINGOFUEL, &
+                               K_CMD_SEQUENCE_ARRIVAL, K_CMD_SEQUENCE_DEPARTURE
    use core_graph, only: NODE_INTERSECTION, NODE_GATE, NODE_HOLD_SHORT, &
                          NODE_RUNWAY_THRESHOLD, NODE_RUNWAY_EXIT, NODE_DEICE_PAD, &
                          node_kind_name
@@ -28,15 +32,16 @@ module core_sim
    use core_rng, only: core_stream_for, STREAM_ARRIVAL, STREAM_DEPARTURE, STREAM_SCHEDULE
    use core_scheduler, only: scheduler_t
    use core_time, only: MILLISECOND, SECOND, MINUTE, HOUR, DAY, tick_split
-   use core_world, only: world_t, CALLSIGN_LEN, phase_name, wake_letter, &
+   use core_world, only: world_t, CALLSIGN_LEN, DEFAULT_FUEL_MS, phase_name, wake_letter, &
                          PHASE_INBOUND, PHASE_APPROACH, PHASE_LANDING, PHASE_ROLLOUT, &
                          PHASE_TAXI_IN, PHASE_AT_GATE, PHASE_DIVERTED, &
                          PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT, &
-                         PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED, &
+                         PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED, PHASE_HOLDING, &
                          WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    use sys_arrival, only: arrival_system_t
    use sys_departure, only: departure_system_t
    use sys_gates, only: gate_system_t
+   use sys_ops_policy, only: ops_policy_system_t
    use sys_taxi, only: taxi_system_t
    use pic_types, only: default_int
    use pic_error, only: error_t
@@ -55,12 +60,12 @@ module core_sim
    ! against.
    public :: tick_k, id_k, NO_ID, AIRCRAFT_ROUTE_ROWS
    public :: MILLISECOND, SECOND, MINUTE, HOUR, DAY, tick_split
-   public :: CALLSIGN_LEN, phase_name, wake_letter, node_kind_name, event_name
+   public :: CALLSIGN_LEN, DEFAULT_FUEL_MS, phase_name, wake_letter, node_kind_name, event_name
    public :: STREAM_SCHEDULE
    public :: PHASE_INBOUND, PHASE_APPROACH, PHASE_LANDING, PHASE_ROLLOUT
    public :: PHASE_TAXI_IN, PHASE_AT_GATE, PHASE_DIVERTED
    public :: PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT
-   public :: PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED
+   public :: PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED, PHASE_HOLDING
    public :: WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    public :: NODE_INTERSECTION, NODE_GATE, NODE_HOLD_SHORT
    public :: NODE_RUNWAY_THRESHOLD, NODE_RUNWAY_EXIT, NODE_DEICE_PAD
@@ -82,6 +87,7 @@ module core_sim
          !! Master seed. With the command log, this reproduces the session.
 
       type(arrival_system_t) :: arrival
+      type(ops_policy_system_t) :: ops
       type(departure_system_t) :: departures
       type(gate_system_t) :: gates
       type(taxi_system_t) :: taxi
@@ -117,6 +123,15 @@ contains
 
       call this%bus%clear()
 
+      call this%bus%subscribe(K_CMD_SET_VISIBILITY, this%ops, err)
+      call this%bus%subscribe(K_WEATHERCHANGED, this%ops, err)
+      call this%bus%subscribe(K_CMD_SET_ARRIVAL_RATE, this%ops, err)
+      call this%bus%subscribe(K_CMD_CLOSE_RUNWAY, this%ops, err)
+      call this%bus%subscribe(K_CMD_OPEN_RUNWAY, this%ops, err)
+
+      call this%bus%subscribe(K_APPROACHREQUESTED, this%arrival, err)
+      call this%bus%subscribe(K_BINGOFUEL, this%arrival, err)
+      call this%bus%subscribe(K_CMD_SEQUENCE_ARRIVAL, this%arrival, err)
       call this%bus%subscribe(K_TOUCHDOWN, this%arrival, err)
       call this%bus%subscribe(K_ROLLOUTCOMPLETE, this%arrival, err)
 
@@ -133,6 +148,7 @@ contains
       call this%bus%subscribe(K_LINEUPREQUESTED, this%departures, err)
       call this%bus%subscribe(K_LINEUPCLEARED, this%departures, err)
       call this%bus%subscribe(K_TAKEOFFROLLCOMPLETE, this%departures, err)
+      call this%bus%subscribe(K_CMD_SEQUENCE_DEPARTURE, this%departures, err)
       call this%bus%subscribe(K_CMD_HOLD_DEPARTURE, this%departures, err)
       call this%bus%subscribe(K_CMD_RELEASE_DEPARTURE, this%departures, err)
 
@@ -157,7 +173,11 @@ contains
          !! Sim time of touchdown.
       type(error_t), intent(inout), optional :: err
 
-      call this%sched%push(at=at, kind=K_TOUCHDOWN, entity=aircraft, &
+      ! An approach request, not a touchdown. Whether it actually lands then
+      ! depends on the weather, the declared rate and what is ahead of it --
+      ! which is the difference between a schedule and a timetable that always
+      ! happens.
+      call this%sched%push(at=at, kind=K_APPROACHREQUESTED, entity=aircraft, &
                            generation=this%world%aircraft%generation(aircraft), &
                            payload=int(runway, int64), err=err)
    end subroutine sim_schedule_touchdown

@@ -1,0 +1,22 @@
+
+ ---- stats ----
+  sim time          23:00:00
+  aircraft          40
+  parked            28
+  departed          28
+  DIVERTED          12
+  holding circuits  178
+  mean taxi-in      5m06s
+  mean stand wait   7m45s
+  worst stand wait  44m00s
+  mean dep delay    30m31s
+  worst dep delay   114m17s
+  total dep delay   854 min
+  events dispatched 1390
+  events tombstoned 15
+  events scheduled  1405
+  commands issued   2
+  command log hash  10bcae489808c615
+  event log hash    2182a0d4493f0cbe
+  seed              42
+

@@ -17,6 +17,7 @@ module app_airport
                        NODE_INTERSECTION, NODE_GATE, NODE_HOLD_SHORT, &
                        NODE_RUNWAY_THRESHOLD, NODE_RUNWAY_EXIT, NODE_DEICE_PAD, &
                        WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
+   use core_sim, only: AIRCRAFT_ROUTE_ROWS
    use pic_types, only: default_int, int8, int32, int64
    use pic_error, only: error_t, error_raise, ERROR_IO, ERROR_PARSE, ERROR_VALIDATION
    use pic_string_type, only: string_type, char
@@ -164,6 +165,16 @@ contains
       sim%world%graph%max_wake = int(wakes, int8)
 
       call sim%world%graph%build(n_nodes, from, to, cost, err)
+      if (present(err)) then
+         if (err%has_error()) return
+      end if
+
+      ! One route's worth of reservations per aircraft, which is the most any
+      ! of them can hold at once, plus slack for a replan overlapping the route
+      ! it replaces.
+      call sim%world%reservations%reserve_pool(n_nodes, &
+                                               2_default_int*sim%world%aircraft%capacity()* &
+                                               int(AIRCRAFT_ROUTE_ROWS, default_int), err)
    end subroutine fill_graph
 
    subroutine fill_stands(sim, gate_node, gate_wake, gate_label, &

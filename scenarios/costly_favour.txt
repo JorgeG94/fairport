@@ -1,0 +1,42 @@
+# The same day as full_day.txt, with one well-meant decision in it.
+#
+# Left alone, four aircraft run out of holding fuel:
+#
+#   MOR012 (M)  MOR015 (H)  MOR017 (M)  MOR019 (H)
+#
+# MOR015 is a Heavy and it has been holding a long time, so moving it to the
+# front of the landing order looks like the obvious call. It works: MOR015
+# lands.
+#
+# It also costs MOR013 its slot, and MOR013 is the Super. Four aircraft still
+# divert; one of them is now the only A380 of the day, carrying five hundred
+# people instead of three hundred.
+#
+#   baseline              MOR012 MOR015 MOR017 MOR019
+#   sequence 19 at 08:30  MOR012 MOR013 MOR017 MOR019
+#
+# Nothing here is a bug and nothing is being punished. There is not enough
+# runway and not enough apron, no ordering invents either, and every slot given
+# to one aircraft is taken from another. What the command changed was not how
+# many were lost but which -- and it made that worse, because the aircraft that
+# looked like it needed help most was not the one that could least afford to
+# wait.
+#
+# The same command at 09:00 changes nothing at all. By then the fuel is gone
+# and the decision has been made for you.
+#
+#   fairport scenarios/full_day.txt       --seed 42
+#   fairport scenarios/costly_favour.txt  --seed 42
+
+seed 42
+max_aircraft 128
+load airport data/airports/simple.airport
+load schedule data/schedules/day1.toml
+
+# MOR015 is aircraft 19. Front of the landing order.
+at 08:30 sequence_arrival 19 1
+
+run until 23:00
+
+board
+dump stats

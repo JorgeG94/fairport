@@ -11,23 +11,31 @@ module core_sim
    use core_kinds, only: tick_k, id_k, int16, int32, int64, NO_ID
    use core_aircraft, only: AIRCRAFT_ROUTE_ROWS
    use core_bus, only: bus_t
+   use core_command, only: command_t, command_log_t, command_name, &
+                           command_kind_from_name, command_arg_count, is_command_kind
    use core_event, only: event_t
    use core_event_kinds, only: K_TOUCHDOWN, K_ROLLOUTCOMPLETE, K_RUNWAYEXITED, &
                                K_TAXINODEREACHED, K_ONBLOCKS, K_GATEASSIGNED, &
-                               K_REPLANREQUESTED, event_name
+                               K_REPLANREQUESTED, K_CMD_ASSIGN_GATE, event_name, &
+                               K_TURNAROUNDCOMPLETE, K_PUSHBACKREQUESTED, K_PUSHBACKCOMPLETE, &
+                               K_GATERELEASED, K_LINEUPREQUESTED, K_LINEUPCLEARED, &
+                               K_TAKEOFFROLLCOMPLETE, K_CMD_HOLD_DEPARTURE, K_CMD_RELEASE_DEPARTURE
    use core_graph, only: NODE_INTERSECTION, NODE_GATE, NODE_HOLD_SHORT, &
                          NODE_RUNWAY_THRESHOLD, NODE_RUNWAY_EXIT, NODE_DEICE_PAD, &
                          node_kind_name
    use core_log, only: event_log_t
    use core_query, only: aircraft_view_t, gate_view_t, query_aircraft, query_gates
-   use core_rng, only: core_stream_for, STREAM_ARRIVAL
+   use core_rng, only: core_stream_for, STREAM_ARRIVAL, STREAM_DEPARTURE, STREAM_SCHEDULE
    use core_scheduler, only: scheduler_t
    use core_time, only: MILLISECOND, SECOND, MINUTE, HOUR, DAY, tick_split
    use core_world, only: world_t, CALLSIGN_LEN, phase_name, wake_letter, &
                          PHASE_INBOUND, PHASE_APPROACH, PHASE_LANDING, PHASE_ROLLOUT, &
                          PHASE_TAXI_IN, PHASE_AT_GATE, PHASE_DIVERTED, &
+                         PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT, &
+                         PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED, &
                          WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    use sys_arrival, only: arrival_system_t
+   use sys_departure, only: departure_system_t
    use sys_gates, only: gate_system_t
    use sys_taxi, only: taxi_system_t
    use pic_types, only: default_int
@@ -48,12 +56,17 @@ module core_sim
    public :: tick_k, id_k, NO_ID, AIRCRAFT_ROUTE_ROWS
    public :: MILLISECOND, SECOND, MINUTE, HOUR, DAY, tick_split
    public :: CALLSIGN_LEN, phase_name, wake_letter, node_kind_name, event_name
+   public :: STREAM_SCHEDULE
    public :: PHASE_INBOUND, PHASE_APPROACH, PHASE_LANDING, PHASE_ROLLOUT
    public :: PHASE_TAXI_IN, PHASE_AT_GATE, PHASE_DIVERTED
+   public :: PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT
+   public :: PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED
    public :: WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    public :: NODE_INTERSECTION, NODE_GATE, NODE_HOLD_SHORT
    public :: NODE_RUNWAY_THRESHOLD, NODE_RUNWAY_EXIT, NODE_DEICE_PAD
    public :: aircraft_view_t, gate_view_t, query_aircraft, query_gates
+   public :: command_t, command_name, command_kind_from_name
+   public :: command_arg_count, is_command_kind
 
    type :: sim_t
       !! One simulation.
@@ -69,6 +82,7 @@ module core_sim
          !! Master seed. With the command log, this reproduces the session.
 
       type(arrival_system_t) :: arrival
+      type(departure_system_t) :: departures
       type(gate_system_t) :: gates
       type(taxi_system_t) :: taxi
          !! The systems. Held by value here and referred to by pointer from the
@@ -77,6 +91,7 @@ module core_sim
       procedure :: init => sim_init
       procedure :: run_until => sim_run_until
       procedure :: run => sim_run
+      procedure :: submit => sim_submit
       procedure :: schedule_touchdown => sim_schedule_touchdown
       procedure :: destroy => sim_destroy
    end type sim_t
@@ -98,6 +113,7 @@ contains
 
       this%seed = seed
       call core_stream_for(seed, STREAM_ARRIVAL, this%arrival%rng)
+      call core_stream_for(seed, STREAM_DEPARTURE, this%departures%rng)
 
       call this%bus%clear()
 
@@ -107,9 +123,22 @@ contains
       call this%bus%subscribe(K_RUNWAYEXITED, this%gates, err)
       call this%bus%subscribe(K_REPLANREQUESTED, this%gates, err)
       call this%bus%subscribe(K_ONBLOCKS, this%gates, err)
+      call this%bus%subscribe(K_CMD_ASSIGN_GATE, this%gates, err)
+      call this%bus%subscribe(K_GATERELEASED, this%gates, err)
+
+      call this%bus%subscribe(K_ONBLOCKS, this%departures, err)
+      call this%bus%subscribe(K_TURNAROUNDCOMPLETE, this%departures, err)
+      call this%bus%subscribe(K_PUSHBACKREQUESTED, this%departures, err)
+      call this%bus%subscribe(K_PUSHBACKCOMPLETE, this%departures, err)
+      call this%bus%subscribe(K_LINEUPREQUESTED, this%departures, err)
+      call this%bus%subscribe(K_LINEUPCLEARED, this%departures, err)
+      call this%bus%subscribe(K_TAKEOFFROLLCOMPLETE, this%departures, err)
+      call this%bus%subscribe(K_CMD_HOLD_DEPARTURE, this%departures, err)
+      call this%bus%subscribe(K_CMD_RELEASE_DEPARTURE, this%departures, err)
 
       call this%bus%subscribe(K_GATEASSIGNED, this%taxi, err)
       call this%bus%subscribe(K_TAXINODEREACHED, this%taxi, err)
+      call this%bus%subscribe(K_PUSHBACKCOMPLETE, this%taxi, err)
    end subroutine sim_init
 
    subroutine sim_schedule_touchdown(this, aircraft, runway, at, err)
@@ -132,6 +161,33 @@ contains
                            generation=this%world%aircraft%generation(aircraft), &
                            payload=int(runway, int64), err=err)
    end subroutine sim_schedule_touchdown
+
+   subroutine sim_submit(this, command, err)
+      !! Record a player command and schedule it for the next tick.
+      !!
+      !! This is the only way player input reaches the simulation, and it is
+      !! deliberately the long way round. A command that mutated the world
+      !! directly would take effect at whatever point in the tick the
+      !! keystroke happened to arrive, and the replay would not reproduce it.
+      !! Written down first, then scheduled, then dispatched in the queue's
+      !! order like everything else.
+      !!
+      !! `now + 1` rather than `now`: a command issued while the current tick
+      !! is being dispatched must not join the batch already in flight, or its
+      !! effect would depend on how far through that batch the queue had got.
+      class(sim_t), intent(inout) :: this
+      type(command_t), intent(in) :: command
+         !! The command to issue.
+      type(error_t), intent(inout), optional :: err
+
+      integer(int64) :: index
+
+      call this%world%commands%append(this%world%now, command, index, err)
+      if (index == 0_int64) return
+
+      call this%sched%push(at=this%world%now + 1_tick_k, kind=command%kind, &
+                           entity=command%a, payload=index, err=err)
+   end subroutine sim_submit
 
    subroutine sim_run_until(this, horizon, err)
       !! Dispatch every event up to and including `horizon`.

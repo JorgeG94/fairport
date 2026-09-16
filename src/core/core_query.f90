@@ -43,6 +43,12 @@ module core_query
          !! When it parked, or zero if it has not.
       integer(int32) :: pax = 0_int32
          !! Passengers on board.
+      integer(tick_k) :: airborne_tick = 0_tick_k
+         !! When it left the ground, or zero if it has not.
+      integer(tick_k) :: delay_ms = 0_tick_k
+         !! Ready to airborne: every minute the airfield cost this departure.
+      integer(int32) :: held = 0_int32
+         !! Non-zero while the player is holding it on its stand.
    end type aircraft_view_t
 
    type :: gate_view_t
@@ -84,6 +90,9 @@ contains
          out(i)%touchdown_tick = w%aircraft%touchdown_tick(i)
          out(i)%on_blocks_tick = w%aircraft%on_blocks_tick(i)
          out(i)%pax = w%aircraft%pax(i)
+         out(i)%airborne_tick = w%aircraft%airborne_tick(i)
+         out(i)%delay_ms = w%aircraft%delay_ms(i)
+         out(i)%held = w%aircraft%held(i)
       end do
    end subroutine query_aircraft
 

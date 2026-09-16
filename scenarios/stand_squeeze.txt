@@ -1,0 +1,34 @@
+# The same morning as clear_day, with one player decision in it.
+#
+# Left alone, tightest-fit puts QFA412 (Heavy) on A2 and keeps A1 -- the only
+# Super stand -- free for UAE414. Here the player overrides that at 06:46 and
+# parks the Heavy on A1.
+#
+# Twelve minutes later the A380 vacates the runway with nowhere to go, and
+# spends the rest of the session on the runway exit asking for a stand that
+# will not come free. One command, one consequence, forty minutes apart.
+#
+# That is the milestone 1 success criterion in miniature: a run where nothing
+# looks obviously wrong still ends badly, and the player can trace it back to a
+# single gate assignment.
+#
+# It is also a regression test. `at 06:46 assign_gate 1 1` is the whole of the
+# player input, so the session is reproducible from this file and a seed:
+#   fairport scenarios/stand_squeeze.txt --seed 42 --hash
+
+seed 42
+max_aircraft 16
+load airport data/airports/simple.airport
+
+arrival QFA412 H 240 at 06:45 runway 1
+arrival VOZ881 M 170 at 06:52 runway 1
+arrival UAE414 S 380 at 06:58 runway 1
+arrival JST615 M 186 at 07:04 runway 1
+
+# aircraft 1 (QFA412) onto gate 1 (A1, the Super stand)
+at 06:46 assign_gate 1 1
+
+run until 09:00
+
+board
+dump stats

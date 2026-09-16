@@ -26,7 +26,7 @@ module core_rng
    public :: stream_t
    public :: core_stream_for
    public :: STREAM_ARRIVAL, STREAM_DEPARTURE, STREAM_TAXI, STREAM_WEATHER
-   public :: STREAM_INCIDENT, STREAM_ECONOMY, STREAM_PASSENGER
+   public :: STREAM_INCIDENT, STREAM_ECONOMY, STREAM_PASSENGER, STREAM_SCHEDULE
 
    ! Stream identifiers. APPEND ONLY.
    integer(default_int), parameter :: STREAM_ARRIVAL = 1_default_int
@@ -36,6 +36,7 @@ module core_rng
    integer(default_int), parameter :: STREAM_INCIDENT = 5_default_int
    integer(default_int), parameter :: STREAM_ECONOMY = 6_default_int
    integer(default_int), parameter :: STREAM_PASSENGER = 7_default_int
+   integer(default_int), parameter :: STREAM_SCHEDULE = 8_default_int
 
    type :: stream_t
       !! One system's generator.

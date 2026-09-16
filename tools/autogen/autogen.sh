@@ -15,12 +15,14 @@ cd "$(dirname "$0")"
 # generate
 fypp core_event_kinds.fypp >& core_event_kinds.f90
 fypp core_aircraft.fypp >& core_aircraft.f90
+fypp core_command.fypp >& core_command.f90
 
 # copy
 cp core_event_kinds.f90 ../../src/core/generated/
 cp core_aircraft.f90 ../../src/core/generated/
+cp core_command.f90 ../../src/core/generated/
 
 # cleanup
-rm -f core_event_kinds.f90 core_aircraft.f90
+rm -f core_event_kinds.f90 core_aircraft.f90 core_command.f90
 
-echo "regenerated: src/core/generated/core_event_kinds.f90 src/core/generated/core_aircraft.f90"
+echo "regenerated: src/core/generated/{core_event_kinds,core_aircraft,core_command}.f90"

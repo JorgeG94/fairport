@@ -1,22 +1,29 @@
 
  FAIRPORT            09:00:00     VIS 10000m   ARR 30/hr   DEP 30/hr
 
- #  CALL      TYPE  PHASE      NODE  GATE  TD        ONBLK     TAXI
-  1  QFA412    H     at_gate      10    A2  06:45:00  06:47:49  2m49s
-  2  VOZ881    M     at_gate      11    A3  06:52:00  06:54:19  2m19s
-  3  UAE414    S     at_gate       9    A1  06:58:00  07:00:43  2m43s
-  4  JST615    M     at_gate      12    B1  07:04:00  07:06:53  2m53s
+ #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY
+  1  QFA412    H     departed      --  06:45:00  06:47:49  07:53:59   4m51s
+  2  VOZ881    M     departed      --  06:52:00  06:54:19  07:33:49   4m17s
+  3  UAE414    S     departed      --  06:58:00  07:00:43  08:35:51   4m43s
+  4  JST615    M     departed      --  07:04:00  07:06:53  07:49:40   4m54s
 
- GATES  A1[UAE414] A2[QFA412] A3[VOZ881] B1[JST615] B2[------] B3[------]
+ GATES  A1[------] A2[------] A3[------] B1[------] B2[------] B3[------]
 
 
  ---- stats ----
   sim time          09:00:00
   aircraft          4
   parked            4
+  departed          4
   mean gate-in      2m41s
-  events dispatched 35
+  mean dep delay    4m41s
+  worst dep delay   4m54s
+  total dep delay   18 min
+  events dispatched 82
   events tombstoned 0
-  events scheduled  35
-  event log hash    096f18835cec2c95
+  events scheduled  82
+  commands issued   0
+  command log hash  a8c7f832281a39c5
+  event log hash    b59b286e6002af34
+  seed              42
 

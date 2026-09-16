@@ -7,7 +7,9 @@ module sys_gates
    use core_kinds, only: tick_k, id_k, int32, int64, NO_ID
    use core_time, only: SECOND
    use core_event, only: event_t
-   use core_event_kinds, only: K_RUNWAYEXITED, K_GATEASSIGNED, K_ONBLOCKS, K_REPLANREQUESTED
+   use core_command, only: command_t
+   use core_event_kinds, only: K_RUNWAYEXITED, K_GATEASSIGNED, K_ONBLOCKS, &
+                               K_REPLANREQUESTED, K_CMD_ASSIGN_GATE, K_GATERELEASED
    use core_scheduler, only: scheduler_t
    use core_system, only: system_t
    use core_world, only: world_t, PHASE_AT_GATE
@@ -64,6 +66,10 @@ contains
          call assign_stand(w, sched, event)
       case (K_ONBLOCKS)
          call on_blocks(w, event)
+      case (K_CMD_ASSIGN_GATE)
+         call commanded_stand(w, sched, event)
+      case (K_GATERELEASED)
+         call release_stand(w, event)
       case default
          ! Not ours.
       end select
@@ -102,6 +108,72 @@ contains
                       generation=w%aircraft%generation(aircraft), &
                       payload=int(gate, int64))
    end subroutine assign_stand
+
+   subroutine commanded_stand(w, sched, event)
+      !! The player has named a stand for an aircraft.
+      !!
+      !! A command overrides the tightest-fit choice `free_gate_for` would
+      !! have made, which is the point: the solver is deliberately mediocre and
+      !! the player is the optimizer. What a command cannot do is break an
+      !! invariant -- an occupied stand stays occupied, and a stand too small
+      !! for the aircraft stays refused. A rejected command is not an error; it
+      !! is a decision that did not work, and it stays in the log so the replay
+      !! rejects it identically.
+      type(world_t), intent(inout) :: w
+      type(scheduler_t), intent(inout) :: sched
+      type(event_t), intent(in) :: event
+
+      type(command_t) :: command
+      integer(tick_k) :: issued_at
+      integer(id_k) :: aircraft, gate
+
+      call w%commands%get(event%payload, issued_at, command)
+      aircraft = command%a
+      gate = command%b
+
+      if (aircraft < 1_id_k .or. int(aircraft, default_int) > w%aircraft%size()) return
+      if (gate < 1_id_k .or. gate > w%n_gates) return
+
+      ! Already parked, or already heading somewhere: too late to redirect at
+      ! milestone 0's fidelity. Re-routing a taxiing aircraft is the
+      ! reservation table's problem, and it does not exist yet.
+      if (w%aircraft%gate(aircraft) /= NO_ID) return
+
+      if (w%gate_occupant(gate) /= NO_ID) return
+      if (w%gate_max_wake(gate) < w%aircraft%wake(aircraft)) return
+
+      w%gate_occupant(gate) = aircraft
+      w%aircraft%gate(aircraft) = gate
+      w%aircraft%goal(aircraft) = w%gate_node(gate)
+
+      call sched%push(at=w%now, kind=K_GATEASSIGNED, entity=aircraft, &
+                      generation=w%aircraft%generation(aircraft), &
+                      payload=int(gate, int64))
+   end subroutine commanded_stand
+
+   subroutine release_stand(w, event)
+      !! A departure is clear of its stand.
+      !!
+      !! Nothing is scheduled to tell waiting arrivals. They are already asking
+      !! every minute, and a stand that frees is picked up by the next retry.
+      !! Notifying every waiting aircraft instead would mean forty of them
+      !! re-deciding at once, which is where both nondeterminism and gridlock
+      !! come from.
+      type(world_t), intent(inout) :: w
+      type(event_t), intent(in) :: event
+
+      integer(id_k) :: aircraft, gate
+
+      aircraft = event%entity
+      gate = int(event%payload, id_k)
+      if (gate < 1_id_k .or. gate > w%n_gates) return
+      if (w%gate_occupant(gate) /= aircraft) return
+
+      w%gate_occupant(gate) = NO_ID
+      if (aircraft >= 1_id_k .and. int(aircraft, default_int) <= w%aircraft%size()) then
+         w%aircraft%gate(aircraft) = NO_ID
+      end if
+   end subroutine release_stand
 
    subroutine on_blocks(w, event)
       !! Chocks in. The arrival is parked.

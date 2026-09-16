@@ -1,5 +1,7 @@
 ! SPDX-License-Identifier: MIT
 ! Copyright (c) 2026 Jorge Luis Galvez Vallejo
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jorge Luis Galvez Vallejo
 !! Stable numeric identifiers for every event kind.
 !!
 !! GENERATED FILE -- DO NOT EDIT.
@@ -52,6 +54,8 @@ module core_event_kinds
       !! A route must be recomputed.
    integer(int16), parameter, public :: K_INCIDENTTRIGGERED = 18_int16
       !! An incident has fired.
+   integer(int16), parameter, public :: K_LINEUPREQUESTED = 19_int16
+      !! A departure is at the holding point.
    integer(int16), parameter, public :: K_PASSENGERENTEREDCONCOURSE = 40_int16
       !! Landside, milestone 3.
    integer(int16), parameter, public :: K_PASSENGEREXITEDARRIVALS = 41_int16
@@ -65,12 +69,29 @@ module core_event_kinds
    integer(int16), parameter, public :: K_BAGSTOLEN = 45_int16
       !! Landside, milestone 3.
 
-   integer, parameter :: MAX_EVENT_KIND = 45
+   integer(int16), parameter, public :: K_CMD_ASSIGN_GATE = 60_int16
+      !! Player command: Park an arrival on a named stand.
+   integer(int16), parameter, public :: K_CMD_HOLD_DEPARTURE = 61_int16
+      !! Player command: Keep a departure on its stand.
+   integer(int16), parameter, public :: K_CMD_RELEASE_DEPARTURE = 62_int16
+      !! Player command: Let a held departure go.
+   integer(int16), parameter, public :: K_CMD_SEQUENCE_ARRIVAL = 63_int16
+      !! Player command: Move an arrival to a place in the landing order.
+   integer(int16), parameter, public :: K_CMD_SEQUENCE_DEPARTURE = 64_int16
+      !! Player command: Move a departure to a place in the queue.
+   integer(int16), parameter, public :: K_CMD_CLOSE_RUNWAY = 65_int16
+      !! Player command: Take a runway out of use.
+   integer(int16), parameter, public :: K_CMD_OPEN_RUNWAY = 66_int16
+      !! Player command: Return a runway to use.
+   integer(int16), parameter, public :: K_CMD_SET_ARRIVAL_RATE = 67_int16
+      !! Player command: Set the declared arrival rate, per hour.
+
+   integer, parameter :: MAX_EVENT_KIND = 67
       !! Largest identifier in use, and therefore the upper bound of the bus
       !! dispatch table. Default integer kind on purpose: it is an array bound,
       !! not simulation state. Recomputed by fypp whenever the list grows.
 
-   integer, parameter :: N_EVENT_KINDS = 24
+   integer, parameter :: N_EVENT_KINDS = 33
       !! How many kinds are declared, which is not `MAX_EVENT_KIND` because the
       !! numbering leaves gaps between sections.
 
@@ -123,6 +144,8 @@ contains
          name = "ReplanRequested"
       case (18_int16)
          name = "IncidentTriggered"
+      case (19_int16)
+         name = "LineUpRequested"
       case (40_int16)
          name = "PassengerEnteredConcourse"
       case (41_int16)
@@ -135,6 +158,22 @@ contains
          name = "BagLoaded"
       case (45_int16)
          name = "BagStolen"
+      case (60_int16)
+         name = "CmdAssignGate"
+      case (61_int16)
+         name = "CmdHoldDeparture"
+      case (62_int16)
+         name = "CmdReleaseDeparture"
+      case (63_int16)
+         name = "CmdSequenceArrival"
+      case (64_int16)
+         name = "CmdSequenceDeparture"
+      case (65_int16)
+         name = "CmdCloseRunway"
+      case (66_int16)
+         name = "CmdOpenRunway"
+      case (67_int16)
+         name = "CmdSetArrivalRate"
       case default
          name = "Unknown"
       end select

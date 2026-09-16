@@ -141,13 +141,80 @@ To regenerate the golden output after an intended change:
 ending conversion. A CRLF rewrite there is a Windows-only diff that reads as
 whitespace noise.
 
-## Where milestone 0 stops
+### Commands are the only way player input enters
 
-Implemented: scheduler, bus, world, graph loader, integer routing, batch mode,
-the arrival chain from touchdown to on-blocks, the event-log digest.
+`sim%submit(command)` appends to `world%commands` and schedules the command's
+own event kind for `now + 1`. Nothing else may mutate the world on the player's
+behalf. `now + 1` rather than `now` so a command cannot join the batch already
+being dispatched, where its effect would depend on how far through that batch
+the queue had got.
 
-Not yet, and deliberately: player commands, departures, the reservation table,
-weather and ops policy, economy, passengers. `sim_schedule_touchdown` is the
-only way into the queue and milestone 1 replaces it with a schedule loader and
-commands, both arriving as events stamped for a tick rather than as direct
-mutations.
+Command identifiers occupy event kinds 60-79 and are declared in
+`tools/autogen/commands.fypp`, which both `core_event_kinds.fypp` and
+`core_command.fypp` include. One list, two consumers. `test_core_command`
+asserts the two numberings never collide.
+
+The scheduled event carries the command's log index as its payload, so a
+handler recovers all four fields rather than the two an event has room for, and
+what it acts on is exactly what was written down.
+
+## Where milestone 1 has got to
+
+Done:
+
+- **Commands and the command log**, so `(seed, command log)` is complete rather
+  than half-built. `assign_gate` works end to end; the other seven commands are
+  declared and unhandled until their systems exist.
+- **The TOML schedule loader**, via toml-f pinned at v0.5.2. `[[arrival]]` pins
+  an exact movement; `[[bank]]` states volume and shape and the loader draws
+  the movements from the schedule's own RNG stream. Pinned movements load
+  first, so a command naming aircraft 1 keeps meaning the same aircraft when a
+  bank is resized.
+
+- **The departure manager.** Turnaround, pushback, stand release, taxi out,
+  the runway queue and takeoff. `WAKE_SEP_SEC` finally has a caller, and
+  `hold_departure` / `release_departure` are the player's lever on it.
+
+Next, in order: weather and ops policy, fuel and diversion, the reservation
+table, and the interactive terminal last.
+
+### `runway_free_at` only ever moves forward
+
+Every claimant on a runway -- an arrival touching down, a departure reserving a
+takeoff slot, a departure rolling -- writes `max(current, mine)`, never a flat
+assignment. Writing it flat let an arrival clobber a reservation a departure had
+already made, and a Light rolled fifteen seconds behind a Heavy where the matrix
+demands three minutes. `test_sys_departure` checks every consecutive pair, which
+is how that was found: it was one pair in forty-nine.
+
+### Phases are not end states
+
+An aircraft that parks now also leaves again, so asserting
+`phase == PHASE_AT_GATE` at a horizon is asserting the run stopped at the right
+moment rather than that anything happened. Assert the tick -- `on_blocks_tick > 0`
+-- which records that it happened at all. Two tests had to be corrected for this
+when the departure manager landed.
+
+### A bank is generated traffic
+
+Which makes "it loaded without complaining" no evidence at all. Two traps hit
+while writing its tests, both worth remembering:
+
+- Comparing `touchdown_tick` **before running the simulation** compares two sets
+  of zeros, and every loader passes that. `test_app_schedule` now asserts the
+  first tick is non-zero before comparing anything.
+- A `sim_t` that has not been `init`-ed has an empty bus, so nothing dispatches
+  at all. Seeding and initialising belong in the fixture, not in the test.
+
+### toml-f is `app/`'s alone
+
+It allocates, reads files and carries its own error type. `check_layering.sh`
+refuses `use tomlf` anywhere under `src/core/`. Its `pos` arguments are default
+`integer`, which stops matching `default_int` under `PIC_DEFAULT_INT8=ON`, so
+`app_schedule` converts at the boundary once rather than breaking in the other
+integer width.
+
+## Where milestone 0 stopped
+
+Scheduler, bus, world, graph loader, integer routing, batch mode, the arrival
+chain from touchdown to on-blocks, the event-log digest.

@@ -136,15 +136,17 @@ contains
       call check(error,.not. err%has_error(), "the run reported an error")
       if (allocated(error)) return
 
-      call check(error, sim%world%aircraft%phase(1) == PHASE_AT_GATE, &
+      ! Since the departure manager landed, an aircraft that reaches a stand
+      ! also leaves it again, so the evidence is the on-blocks tick rather than
+      ! the phase it happens to be in at the horizon.
+      call check(error, sim%world%aircraft%on_blocks_tick(1) > 0_tick_k, &
                  "the aircraft never reached a stand")
-      if (allocated(error)) return
-      call check(error, sim%world%gate_occupant(1) == 1_id_k, "the stand is not occupied")
       if (allocated(error)) return
       call check(error, sim%world%aircraft%on_blocks_tick(1) > sim%world%aircraft%touchdown_tick(1), &
                  "it parked before it landed")
       if (allocated(error)) return
-      call check(error, sim%world%aircraft%node(1) == 3_id_k, "it is not at the stand's node")
+      call check(error, sim%world%aircraft%on_blocks_tick(1) > sim%world%aircraft%touchdown_tick(1), &
+                 "it parked before it landed")
 
       call sim%destroy()
    end subroutine test_reaches_stand

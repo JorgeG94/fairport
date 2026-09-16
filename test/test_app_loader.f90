@@ -314,7 +314,10 @@ contains
       if (allocated(error)) return
       call check(error, trim(sim%world%callsign(1)) == "TEST01", "callsign")
       if (allocated(error)) return
-      call check(error, sim%world%aircraft%phase(1) == PHASE_AT_GATE, "the aircraft never parked")
+      ! Not `phase == PHASE_AT_GATE`. Since the departure manager landed, an
+      ! aircraft that parks also leaves again, so the end state is `departed`
+      ! and the evidence that it parked is the tick, not the phase.
+      call check(error, sim%world%aircraft%on_blocks_tick(1) > 0_tick_k, "the aircraft never parked")
       if (allocated(error)) return
       call check(error, sim%world%aircraft%touchdown_tick(1) == 6_tick_k*HOUR, "touchdown time")
       if (allocated(error)) return

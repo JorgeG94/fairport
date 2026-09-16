@@ -1,0 +1,38 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jorge Luis Galvez Vallejo
+#! ---------------------------------------------------------------------------
+#! The canonical player command list.
+#!
+#! APPEND ONLY. NEVER REORDER. NEVER DELETE.
+#!
+#! A command identifier appears in every saved command log, and a command log
+#! plus a seed is a whole session. Renumbering one does not break a build, it
+#! silently replays an old save as a different game.
+#!
+#! This file is a data library and nothing else: it defines `COMMANDS` and does
+#! not invoke anything, so it is safe to `#:include`. Two templates read it --
+#! `core_event_kinds.fypp`, which gives every command an event identifier from
+#! the same numbering as the rest, and `core_command.fypp`, which builds the
+#! command type, the name lookup and the log. One list, two consumers, and no
+#! way for the identifier a scenario writes to disagree with the identifier the
+#! bus dispatches.
+#!
+#! Fields are (name, id, n_args, doc):
+#!   name    the keyword a scenario script writes.
+#!   id      the identifier, which is also the event kind. Commands occupy
+#!           60-79; `core_event_kinds.fypp` reserves that range and a test
+#!           asserts the two lists never overlap.
+#!   n_args  how many integer arguments the scenario form takes, 1 or 2.
+#!   doc     FORD documentation.
+#! ---------------------------------------------------------------------------
+#:set COMMANDS = [                                                                    &
+  ('assign_gate',         60, 2, 'Park an arrival on a named stand.'),                &
+  ('hold_departure',      61, 1, 'Keep a departure on its stand.'),                   &
+  ('release_departure',   62, 1, 'Let a held departure go.'),                         &
+  ('sequence_arrival',    63, 2, 'Move an arrival to a place in the landing order.'), &
+  ('sequence_departure',  64, 2, 'Move a departure to a place in the queue.'),        &
+  ('close_runway',        65, 1, 'Take a runway out of use.'),                        &
+  ('open_runway',         66, 1, 'Return a runway to use.'),                          &
+  ('set_arrival_rate',    67, 1, 'Set the declared arrival rate, per hour.')          ]
+#:set COMMAND_ID_MIN = 60
+#:set COMMAND_ID_MAX = 79

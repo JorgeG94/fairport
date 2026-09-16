@@ -1,0 +1,386 @@
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jorge Luis Galvez Vallejo
+! SPDX-License-Identifier: MIT
+! Copyright (c) 2026 Jorge Luis Galvez Vallejo
+!! Player commands and the command log.
+!!
+!! GENERATED FILE -- DO NOT EDIT.
+!! Produced by `tools/autogen/core_command.fypp`; edit the template and rerun
+!! `tools/autogen/autogen.sh` instead.
+module core_command
+   !! The other half of the invariant.
+   !!
+   !! The simulation is reproducible from `(seed, command log)` alone. The seed
+   !! has been there since milestone 0; this is the log. Together they are the
+   !! save file, the replay, the regression test and the bug report, and they
+   !! are a few kilobytes rather than a world dump.
+   !!
+   !! Player input enters exactly like everything else: a command is appended
+   !! to the log and an event is scheduled for the next tick. **Never a direct
+   !! mutation.** A command that reached into the world directly would execute
+   !! at a point in the tick that depends on when the keystroke arrived, and
+   !! the replay would not reproduce it.
+   !!
+   !! The scheduled event carries the command's index in the log as its
+   !! payload, so a handler recovers the whole command rather than the one or
+   !! two fields an event has room for. That also makes the log authoritative:
+   !! what the handler acts on is exactly what was written down.
+   use core_kinds, only: tick_k, id_k, int16, int32, int64, NO_ID
+   use core_event_kinds, only: event_name
+   use pic_types, only: default_int
+   use pic_error, only: error_t, error_raise, ERROR_ALLOC, ERROR_VALIDATION
+   use pic_array_hash, only: array_hash64_t, array_hash64_hex
+   implicit none
+   private
+
+   public :: command_t
+   public :: command_log_t
+   public :: command_name
+   public :: command_kind_from_name
+   public :: command_arg_count
+   public :: is_command_kind
+   public :: COMMAND_ID_MIN, COMMAND_ID_MAX
+   public :: N_COMMANDS
+
+   integer(int16), parameter :: COMMAND_ID_MIN = 60_int16
+      !! First identifier reserved for commands.
+   integer(int16), parameter :: COMMAND_ID_MAX = 79_int16
+      !! Last identifier reserved for commands. `core_event_kinds` must not use
+      !! anything in this range for a non-command event.
+   integer, parameter :: N_COMMANDS = 8
+      !! Commands declared.
+
+   integer(default_int), parameter :: INITIAL_CAPACITY = 64_default_int
+      !! Commands reserved on first use; grown by doubling.
+
+   type :: command_t
+      !! One player instruction.
+      !!
+      !! Four integers, no allocatable, no pointer: a command is written to a
+      !! save file as-is and compared byte for byte.
+      integer(int16) :: kind = 0_int16
+         !! One of the `K_CMD_*` identifiers, which is also its event kind.
+      integer(id_k) :: a = NO_ID
+         !! First subject. Usually an aircraft; a runway for the runway
+         !! commands. Copied into the scheduled event's `entity`, so the
+         !! ordinary tombstoning applies.
+      integer(id_k) :: b = NO_ID
+         !! Second subject, or `NO_ID`. A gate, or a position in a sequence.
+      integer(int64) :: value = 0_int64
+         !! Scalar argument, for the commands that carry a rate rather than a
+         !! second handle.
+   end type command_t
+
+   type :: command_log_t
+      !! Every command issued this session, in the order it was issued.
+      private
+      integer(tick_k), allocatable :: at(:)
+         !! Sim time each command was submitted at.
+      integer(int16), allocatable :: kind(:)
+      integer(id_k), allocatable :: subject_a(:)
+      integer(id_k), allocatable :: subject_b(:)
+      integer(int64), allocatable :: value(:)
+         !! The commands, one array per field.
+      integer(default_int) :: n = 0_default_int
+         !! Commands recorded.
+      integer(default_int) :: cap = 0_default_int
+         !! Commands the arrays have room for.
+   contains
+      procedure :: append => log_append
+      procedure :: get => log_get
+      procedure :: size => log_size
+      procedure :: digest => log_digest
+      procedure :: digest_hex => log_digest_hex
+      procedure :: write_to => log_write_to
+      procedure :: destroy => log_destroy
+   end type command_log_t
+
+contains
+
+   pure function command_name(kind) result(name)
+      !! The keyword a scenario writes for this command.
+      integer(int16), intent(in) :: kind
+         !! One of the `K_CMD_*` identifiers.
+      character(len=:), allocatable :: name
+
+      select case (kind)
+      case (60_int16)
+         name = "assign_gate"
+      case (61_int16)
+         name = "hold_departure"
+      case (62_int16)
+         name = "release_departure"
+      case (63_int16)
+         name = "sequence_arrival"
+      case (64_int16)
+         name = "sequence_departure"
+      case (65_int16)
+         name = "close_runway"
+      case (66_int16)
+         name = "open_runway"
+      case (67_int16)
+         name = "set_arrival_rate"
+      case default
+         name = "unknown"
+      end select
+   end function command_name
+
+   pure function command_kind_from_name(name) result(kind)
+      !! Look a command up by keyword, for the scenario parser.
+      !!
+      !! Returns zero for anything unrecognised, which the caller turns into a
+      !! parse error naming the line. Generated from the same list as
+      !! `command_name`, so a keyword that parses always renders back.
+      character(len=*), intent(in) :: name
+         !! Keyword as written in the script.
+      integer(int16) :: kind
+
+      select case (name)
+      case ("assign_gate")
+         kind = 60_int16
+      case ("hold_departure")
+         kind = 61_int16
+      case ("release_departure")
+         kind = 62_int16
+      case ("sequence_arrival")
+         kind = 63_int16
+      case ("sequence_departure")
+         kind = 64_int16
+      case ("close_runway")
+         kind = 65_int16
+      case ("open_runway")
+         kind = 66_int16
+      case ("set_arrival_rate")
+         kind = 67_int16
+      case default
+         kind = 0_int16
+      end select
+   end function command_kind_from_name
+
+   pure function command_arg_count(kind) result(n_args)
+      !! How many integer arguments this command's scenario form takes.
+      integer(int16), intent(in) :: kind
+         !! One of the `K_CMD_*` identifiers.
+      integer(int32) :: n_args
+
+      select case (kind)
+      case (60_int16)
+         n_args = 2_int32
+      case (61_int16)
+         n_args = 1_int32
+      case (62_int16)
+         n_args = 1_int32
+      case (63_int16)
+         n_args = 2_int32
+      case (64_int16)
+         n_args = 2_int32
+      case (65_int16)
+         n_args = 1_int32
+      case (66_int16)
+         n_args = 1_int32
+      case (67_int16)
+         n_args = 1_int32
+      case default
+         n_args = 0_int32
+      end select
+   end function command_arg_count
+
+   pure function is_command_kind(kind) result(is_command)
+      !! Whether an event kind is a player command.
+      integer(int16), intent(in) :: kind
+         !! Event kind to test.
+      logical :: is_command
+
+      is_command = kind >= COMMAND_ID_MIN .and. kind <= COMMAND_ID_MAX
+   end function is_command_kind
+
+   subroutine log_append(this, at, command, index, err)
+      !! Record a command and return its index in the log.
+      class(command_log_t), intent(inout) :: this
+      integer(tick_k), intent(in) :: at
+         !! Sim time the command was submitted at.
+      type(command_t), intent(in) :: command
+         !! The command.
+      integer(int64), intent(out) :: index
+         !! One-based position in the log, which the scheduled event carries as
+         !! its payload. Zero on failure.
+      type(error_t), intent(inout), optional :: err
+
+      index = 0_int64
+
+      if (.not. is_command_kind(command%kind)) then
+         call error_raise(err, ERROR_VALIDATION, "command_log: not a command kind")
+         return
+      end if
+
+      call grow_if_needed(this, err)
+      if (present(err)) then
+         if (err%has_error()) return
+      end if
+
+      this%n = this%n + 1_default_int
+      this%at(this%n) = at
+      this%kind(this%n) = command%kind
+      this%subject_a(this%n) = command%a
+      this%subject_b(this%n) = command%b
+      this%value(this%n) = command%value
+
+      index = int(this%n, int64)
+   end subroutine log_append
+
+   subroutine log_get(this, index, at, command, err)
+      !! Read back the command at `index`.
+      class(command_log_t), intent(in) :: this
+      integer(int64), intent(in) :: index
+         !! One-based position, as carried in an event payload.
+      integer(tick_k), intent(out) :: at
+         !! Sim time it was submitted at.
+      type(command_t), intent(out) :: command
+         !! The command; left at its defaults when `index` is out of range.
+      type(error_t), intent(inout), optional :: err
+
+      integer(default_int) :: slot
+
+      at = 0_tick_k
+      if (index < 1_int64 .or. index > int(this%n, int64)) then
+         call error_raise(err, ERROR_VALIDATION, "command_log: index outside the log")
+         return
+      end if
+
+      slot = int(index, default_int)
+      at = this%at(slot)
+      command%kind = this%kind(slot)
+      command%a = this%subject_a(slot)
+      command%b = this%subject_b(slot)
+      command%value = this%value(slot)
+   end subroutine log_get
+
+   pure function log_size(this) result(n)
+      !! Commands recorded.
+      class(command_log_t), intent(in) :: this
+      integer(default_int) :: n
+
+      n = this%n
+   end function log_size
+
+   function log_digest(this) result(fingerprint)
+      !! Fingerprint the whole log.
+      !!
+      !! Two sessions that issued the same commands at the same sim times agree
+      !! here. Combined with the seed, this is the identity of a session, and
+      !! it is what a replay checks before trusting a saved game.
+      class(command_log_t), intent(in) :: this
+      integer(int64) :: fingerprint
+
+      type(array_hash64_t) :: hasher
+
+      call hasher%update(int(this%n, int64))
+      if (this%n > 0_default_int) then
+         call hasher%update(this%at(1:this%n))
+         call hasher%update(this%kind(1:this%n))
+         call hasher%update(this%subject_a(1:this%n))
+         call hasher%update(this%subject_b(1:this%n))
+         call hasher%update(this%value(1:this%n))
+      end if
+      fingerprint = hasher%digest()
+   end function log_digest
+
+   function log_digest_hex(this) result(text)
+      !! The log's fingerprint as sixteen lowercase hex characters.
+      class(command_log_t), intent(in) :: this
+      character(len=16) :: text
+
+      text = array_hash64_hex(this%digest())
+   end function log_digest_hex
+
+   subroutine log_write_to(this, unit, err)
+      !! Write the log as a scenario script the simulator can read back.
+      !!
+      !! The save file is the input format. That is the whole point of keeping
+      !! commands in a log: a session round-trips through the same parser a
+      !! hand-written scenario does, so there is no second code path for saves
+      !! to drift along.
+      class(command_log_t), intent(in) :: this
+      integer, intent(in) :: unit
+         !! Unit open for formatted writing.
+      type(error_t), intent(inout), optional :: err
+
+      integer(default_int) :: i
+      integer :: status
+
+      do i = 1_default_int, this%n
+         ! Deliberately not list-directed: an explicit format keeps the text
+         ! identical on every compiler, which a golden test depends on.
+         if (command_arg_count(this%kind(i)) >= 2_int32) then
+            write (unit, "(a,i0,a,i0,1x,i0)", iostat=status) &
+               "at ", this%at(i), " "//command_name(this%kind(i))//" ", &
+               this%subject_a(i), this%subject_b(i)
+         else
+            write (unit, "(a,i0,a,i0)", iostat=status) &
+               "at ", this%at(i), " "//command_name(this%kind(i))//" ", &
+               this%subject_a(i)
+         end if
+         if (status /= 0) then
+            call error_raise(err, ERROR_VALIDATION, "command_log: write failed")
+            return
+         end if
+      end do
+   end subroutine log_write_to
+
+   subroutine grow_if_needed(this, err)
+      !! Double the log when it is full.
+      !!
+      !! The log is the one thing in `core/` that grows during a run, because
+      !! it must: a session's length is not known when it starts. It is
+      !! append-only and nothing reads it by address, so growth cannot affect
+      !! event ordering.
+      type(command_log_t), intent(inout) :: this
+      type(error_t), intent(inout), optional :: err
+
+      integer(default_int) :: wanted
+      integer(tick_k), allocatable :: new_at(:)
+      integer(int16), allocatable :: new_kind(:)
+      integer(id_k), allocatable :: new_a(:), new_b(:)
+      integer(int64), allocatable :: new_value(:)
+      integer :: status
+
+      if (this%n < this%cap) return
+
+      wanted = max(INITIAL_CAPACITY, 2_default_int*this%cap)
+      allocate (new_at(wanted), new_kind(wanted), new_a(wanted), new_b(wanted), &
+                new_value(wanted), stat=status)
+      if (status /= 0) then
+         call error_raise(err, ERROR_ALLOC, "command_log: allocation failed")
+         return
+      end if
+
+      if (this%cap > 0_default_int) then
+         new_at(1:this%cap) = this%at
+         new_kind(1:this%cap) = this%kind
+         new_a(1:this%cap) = this%subject_a
+         new_b(1:this%cap) = this%subject_b
+         new_value(1:this%cap) = this%value
+      end if
+
+      call move_alloc(new_at, this%at)
+      call move_alloc(new_kind, this%kind)
+      call move_alloc(new_a, this%subject_a)
+      call move_alloc(new_b, this%subject_b)
+      call move_alloc(new_value, this%value)
+      this%cap = wanted
+   end subroutine grow_if_needed
+
+   subroutine log_destroy(this)
+      !! Release the log.
+      class(command_log_t), intent(inout) :: this
+
+      if (allocated(this%at)) deallocate (this%at)
+      if (allocated(this%kind)) deallocate (this%kind)
+      if (allocated(this%subject_a)) deallocate (this%subject_a)
+      if (allocated(this%subject_b)) deallocate (this%subject_b)
+      if (allocated(this%value)) deallocate (this%value)
+      this%n = 0_default_int
+      this%cap = 0_default_int
+   end subroutine log_destroy
+
+end module core_command

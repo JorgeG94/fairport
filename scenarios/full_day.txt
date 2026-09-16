@@ -1,0 +1,18 @@
+# A full day at SIMPLE, from the TOML schedule.
+#
+# Fifty-two arrivals against six stands and one runway. Nobody departs yet, so
+# the stands fill and stay filled: this is the queue forming, which is exactly
+# what the milestone is for. It gets survivable when the departure manager
+# arrives and starts freeing stands.
+#
+#   fairport scenarios/full_day.txt --seed 42 --hash
+
+seed 42
+max_aircraft 128
+load airport data/airports/simple.airport
+load schedule data/schedules/day1.toml
+
+run until 21:00
+
+board
+dump stats

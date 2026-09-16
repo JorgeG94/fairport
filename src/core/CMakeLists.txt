@@ -6,6 +6,7 @@ target_sources(
           core_event.f90
           core_graph.f90
           generated/core_aircraft.f90
+          generated/core_command.f90
           core_world.f90
           core_scheduler.f90
           core_system.f90
@@ -14,6 +15,7 @@ target_sources(
           core_log.f90
           core_query.f90
           systems/sys_arrival.f90
+          systems/sys_departure.f90
           systems/sys_gates.f90
           systems/sys_taxi.f90
           core_sim.f90)

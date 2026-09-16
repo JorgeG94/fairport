@@ -135,7 +135,13 @@ contains
                    int(next_range(self%rng%gen, 0_default_int, ROLLOUT_JITTER_MS), tick_k)
 
       w%runway_last_wake(runway) = w%aircraft%wake(aircraft)
-      w%runway_free_at(runway) = w%now + rollout_ms + RUNWAY_EXIT_MS
+      ! Never backwards. A departure may already have reserved a slot further
+      ! ahead, and an arrival landing in between must not hand the runway back
+      ! earlier than that reservation -- doing so let a Light roll fifteen
+      ! seconds behind a Heavy, which the separation matrix forbids by three
+      ! minutes.
+      w%runway_free_at(runway) = max(w%runway_free_at(runway), &
+                                     w%now + rollout_ms + RUNWAY_EXIT_MS)
 
       call sched%push(at=w%now + rollout_ms, kind=K_ROLLOUTCOMPLETE, &
                       entity=aircraft, generation=w%aircraft%generation(aircraft), &

@@ -9,12 +9,14 @@ module app_scenario
    !! `fairport scenarios/clear_day.txt --seed 42 --hash` compared against a
    !! committed string, and a bug report is the script that produced it.
    use core_sim, only: sim_t, tick_k, id_k, SECOND, MINUTE, HOUR, &
+                       command_t, command_kind_from_name, command_arg_count, &
                        WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER, &
                        PHASE_APPROACH, CALLSIGN_LEN
    use app_airport, only: load_airport
+   use app_schedule, only: load_schedule, add_arrival, parse_clock_text, wake_from_letter
    use app_render, only: render_board, render_stats
    use app_text, only: int_text
-   use pic_types, only: default_int, int32, int64
+   use pic_types, only: default_int, int16, int32, int64
    use pic_error, only: error_t, error_raise, ERROR_IO, ERROR_PARSE, ERROR_VALIDATION
    use pic_string_type, only: string_type, char
    use pic_tokenizer, only: tokenize, parse_int
@@ -113,6 +115,8 @@ contains
          call do_load(sim, scenario, tokens, line_no, err)
       case ("arrival")
          call do_arrival(sim, tokens, line_no, err)
+      case ("at")
+         call do_at(sim, tokens, line_no, err)
       case ("run")
          call do_run(sim, tokens, line_no, err)
       case ("board")
@@ -192,17 +196,25 @@ contains
                           int_text(int(line_no, int64)))
          return
       end if
-      if (char(tokens(2)) /= "airport") then
-         call error_raise(err, ERROR_PARSE, "run_scenario: only 'load airport' exists at milestone 0, line "// &
+      select case (char(tokens(2)))
+      case ("airport")
+         call load_airport(sim, char(tokens(3)), scenario%max_aircraft, err)
+         if (present(err)) then
+            if (err%has_error()) return
+         end if
+         scenario%airport_loaded = .true.
+      case ("schedule")
+         if (.not. scenario%airport_loaded) then
+            call error_raise(err, ERROR_VALIDATION, &
+                             "run_scenario: load the airport before the schedule, line "// &
+                             int_text(int(line_no, int64)))
+            return
+         end if
+         call load_schedule(sim, char(tokens(3)), err)
+      case default
+         call error_raise(err, ERROR_PARSE, "run_scenario: can load an 'airport' or a 'schedule', line "// &
                           int_text(int(line_no, int64)))
-         return
-      end if
-
-      call load_airport(sim, char(tokens(3)), scenario%max_aircraft, err)
-      if (present(err)) then
-         if (err%has_error()) return
-      end if
-      scenario%airport_loaded = .true.
+      end select
    end subroutine do_load
 
    subroutine do_arrival(sim, tokens, line_no, err)
@@ -278,6 +290,74 @@ contains
 
       call sim%schedule_touchdown(aircraft, runway, at, err)
    end subroutine do_arrival
+
+   subroutine do_at(sim, tokens, line_no, err)
+      !! `at <HH:MM[:SS]> <command> <a> [b]`
+      !!
+      !! Runs the simulation forward to the stated time, then issues the
+      !! command. That ordering is what makes a script mean what it reads:
+      !! a command submitted before time had advanced would take effect at tick
+      !! zero rather than when the player pressed the key.
+      type(sim_t), intent(inout) :: sim
+      type(string_type), intent(in) :: tokens(:)
+         !! The tokenised line.
+      integer(default_int), intent(in) :: line_no
+         !! Line number, for diagnostics.
+      type(error_t), intent(inout), optional :: err
+
+      type(command_t) :: command
+      integer(tick_k) :: at
+      integer(int32) :: expected, subject_a, subject_b
+      type(error_t) :: parse_err
+
+      if (size(tokens) < 4) then
+         call error_raise(err, ERROR_PARSE, &
+                          "run_scenario: at needs <time> <command> <argument>, line "// &
+                          int_text(int(line_no, int64)))
+         return
+      end if
+
+      call parse_clock(char(tokens(2)), at, line_no, err)
+      if (present(err)) then
+         if (err%has_error()) return
+      end if
+
+      command%kind = command_kind_from_name(char(tokens(3)))
+      if (command%kind == 0_int16) then
+         call error_raise(err, ERROR_PARSE, "run_scenario: unknown command '"// &
+                          char(tokens(3))//"' on line "//int_text(int(line_no, int64)))
+         return
+      end if
+
+      expected = command_arg_count(command%kind)
+      if (int(size(tokens), int32) /= 3_int32 + expected) then
+         call error_raise(err, ERROR_PARSE, "run_scenario: "//char(tokens(3))// &
+                          " takes a different number of arguments, line "// &
+                          int_text(int(line_no, int64)))
+         return
+      end if
+
+      subject_b = 0_int32
+      call parse_int(char(tokens(4)), subject_a, parse_err)
+      if (.not. parse_err%has_error() .and. expected >= 2_int32) then
+         call parse_int(char(tokens(5)), subject_b, parse_err)
+      end if
+      if (parse_err%has_error()) then
+         call error_raise(err, ERROR_PARSE, "run_scenario: command argument is not an integer, line "// &
+                          int_text(int(line_no, int64)))
+         return
+      end if
+
+      command%a = int(subject_a, id_k)
+      command%b = int(subject_b, id_k)
+
+      ! Advance to the moment the command was issued, then issue it.
+      call sim%run_until(at, err)
+      if (present(err)) then
+         if (err%has_error()) return
+      end if
+      call sim%submit(command, err)
+   end subroutine do_at
 
    subroutine do_run(sim, tokens, line_no, err)
       !! `run until <HH:MM[:SS]>`

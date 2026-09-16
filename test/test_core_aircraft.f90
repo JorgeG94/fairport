@@ -243,7 +243,7 @@ contains
       !! old checkpoints anyway.
       type(error_type), allocatable, intent(out) :: error
 
-      integer(int64), parameter :: EXPECTED_BYTES = 1015_int64
+      integer(int64), parameter :: EXPECTED_BYTES = 1133_int64
          !! Length of a stream holding exactly two aircraft.
 
       type(aircraft_soa_t) :: container

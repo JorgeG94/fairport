@@ -11,9 +11,16 @@
 #! else. Add new kinds at the end of their section; the gaps between sections
 #! are there so that a later addition can still be grouped sensibly.
 #!
+#! Identifiers 60-79 belong to player commands and are declared in
+#! `commands.fypp`, which this file includes. They are event kinds like any
+#! other -- a command reaches the simulation by being scheduled, never by
+#! mutating anything directly -- so they share one numbering with everything
+#! here, and `test_core_command` asserts the two lists never collide.
+#!
 #! fypp runs at development time only. The generated .f90 is committed, so
 #! building fairport needs neither fypp nor Python. See tools/autogen/autogen.sh.
 #! ---------------------------------------------------------------------------
+#:include 'commands.fypp'
 #:set EVENTS = [                                                              &
   ('Touchdown',                 1, 'An arrival has touched down.'),           &
   ('RolloutComplete',           2, 'The landing roll is over.'),              &
@@ -33,6 +40,7 @@
   ('GateReleased',             16, 'A gate has been given up.'),              &
   ('ReplanRequested',          17, 'A route must be recomputed.'),            &
   ('IncidentTriggered',        18, 'An incident has fired.'),                 &
+  ('LineUpRequested',          19, 'A departure is at the holding point.'),   &
   ('PassengerEnteredConcourse',40, 'Landside, milestone 3.'),                 &
   ('PassengerExitedArrivals',  41, 'Landside, milestone 3.'),                 &
   ('PurchaseMade',             42, 'Landside, milestone 3.'),                 &
@@ -60,12 +68,17 @@ module core_event_kinds
       !! ${doc}$
 #:endfor
 
-   integer, parameter :: MAX_EVENT_KIND = ${max(i for _, i, _ in EVENTS)}$
+#:for name, ident, nargs, doc in COMMANDS
+   integer(int16), parameter, public :: K_CMD_${name.upper()}$ = ${ident}$_int16
+      !! Player command: ${doc}$
+#:endfor
+
+   integer, parameter :: MAX_EVENT_KIND = ${max([i for _, i, _ in EVENTS] + [i for _, i, _, _ in COMMANDS])}$
       !! Largest identifier in use, and therefore the upper bound of the bus
       !! dispatch table. Default integer kind on purpose: it is an array bound,
       !! not simulation state. Recomputed by fypp whenever the list grows.
 
-   integer, parameter :: N_EVENT_KINDS = ${len(EVENTS)}$
+   integer, parameter :: N_EVENT_KINDS = ${len(EVENTS) + len(COMMANDS)}$
       !! How many kinds are declared, which is not `MAX_EVENT_KIND` because the
       !! numbering leaves gaps between sections.
 
@@ -85,6 +98,10 @@ contains
 #:for name, ident, doc in EVENTS
       case (${ident}$_int16)
          name = "${name}$"
+#:endfor
+#:for name, ident, nargs, doc in COMMANDS
+      case (${ident}$_int16)
+         name = "Cmd${''.join(w.capitalize() for w in name.split('_'))}$"
 #:endfor
       case default
          name = "Unknown"

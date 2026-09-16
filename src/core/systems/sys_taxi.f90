@@ -13,11 +13,12 @@ module sys_taxi
    use core_kinds, only: tick_k, id_k, int32, int64, NO_ID
    use core_aircraft, only: AIRCRAFT_ROUTE_ROWS
    use core_event, only: event_t
-   use core_event_kinds, only: K_GATEASSIGNED, K_TAXINODEREACHED, K_ONBLOCKS
+   use core_event_kinds, only: K_GATEASSIGNED, K_TAXINODEREACHED, K_ONBLOCKS, &
+                               K_PUSHBACKCOMPLETE, K_LINEUPREQUESTED
    use core_graph, only: taxi_graph_t
    use core_scheduler, only: scheduler_t
    use core_system, only: system_t
-   use core_world, only: world_t, PHASE_TAXI_IN
+   use core_world, only: world_t, PHASE_TAXI_IN, PHASE_TAXI_OUT, PHASE_LINEUP
    use pic_types, only: default_int
    implicit none
    private
@@ -58,7 +59,10 @@ contains
       type(event_t), intent(in) :: event
 
       select case (event%kind)
-      case (K_GATEASSIGNED)
+      case (K_GATEASSIGNED, K_PUSHBACKCOMPLETE)
+         ! Inbound and outbound are the same problem: route from where the
+         ! aircraft is to wherever it has been told to go. What differs is who
+         ! set the goal and what happens on arrival.
          call plan_route(w, sched, event)
       case (K_TAXINODEREACHED)
          call advance(w, sched, event)
@@ -91,7 +95,11 @@ contains
       w%aircraft%route(1:route_len, aircraft) = route(1:route_len)
       w%aircraft%route_len(aircraft) = route_len
       w%aircraft%route_pos(aircraft) = 1_int32
-      w%aircraft%phase(aircraft) = PHASE_TAXI_IN
+      if (event%kind == K_PUSHBACKCOMPLETE) then
+         w%aircraft%phase(aircraft) = PHASE_TAXI_OUT
+      else
+         w%aircraft%phase(aircraft) = PHASE_TAXI_IN
+      end if
 
       call schedule_next_hop(w, sched, aircraft)
    end subroutine plan_route
@@ -115,8 +123,17 @@ contains
       w%aircraft%node(aircraft) = w%aircraft%route(position, aircraft)
 
       if (position >= w%aircraft%route_len(aircraft)) then
-         call sched%push(at=w%now, kind=K_ONBLOCKS, entity=aircraft, &
-                         generation=w%aircraft%generation(aircraft))
+         if (w%aircraft%phase(aircraft) == PHASE_TAXI_OUT) then
+            ! At the holding point. Whether it may roll is the departure
+            ! manager's call, because the answer depends on wake separation
+            ! from whatever used the runway last.
+            w%aircraft%phase(aircraft) = PHASE_LINEUP
+            call sched%push(at=w%now, kind=K_LINEUPREQUESTED, entity=aircraft, &
+                            generation=w%aircraft%generation(aircraft))
+         else
+            call sched%push(at=w%now, kind=K_ONBLOCKS, entity=aircraft, &
+                            generation=w%aircraft%generation(aircraft))
+         end if
          return
       end if
 

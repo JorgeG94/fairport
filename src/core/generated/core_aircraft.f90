@@ -6,14 +6,16 @@
 !! Produced by `tools/autogen/core_aircraft.fypp`; edit the template and rerun
 !! `tools/autogen/autogen.sh` instead.
 module core_aircraft
-   !! 12 scalar field arrays and 1 matrix field(s), serialized and hashed together.
+   !! 15 scalar field arrays and 1 matrix field(s), serialized and hashed together.
    !!
    !! The schema string below is written into every stream and folded into
    !! every digest, so a checkpoint from a different field list fails loudly
    !! instead of decoding as garbage:
    !!
    !! ```
-   !! aircraft;phase:i32,wake:i32,gate:i32,node:i32,goal:i32,generation:i32,route_len:i32,route_pos:i32,pax:i32,touchdown_tick:i64,on_blocks_tick:i64,delay_ms:i64,route:i32x64
+   !! aircraft;phase:i32,wake:i32,gate:i32,node:i32,goal:i32,generation:i32,route_len:i32,route_pos:i32,pa
+   !! x:i32,touchdown_tick:i64,on_blocks_tick:i64,delay_ms:i64,held:i32,ready_tick:i64,airborne_tick:i64,r
+   !! oute:i32x64
    !! ```
    !!
    !! prefixed by `SOA_SCHEMA_PREFIX`, which carries pic's own record-layout
@@ -33,7 +35,8 @@ module core_aircraft
    public :: AIRCRAFT_ROUTE_ROWS
 
    character(len=*), parameter :: AIRCRAFT_SCHEMA = SOA_SCHEMA_PREFIX//"aircraft;phase:i32,wake:i32,gate:i32,node:i32,goal:i32,gene&
-       &ration:i32,route_len:i32,route_pos:i32,pax:i32,touchdown_tick:i64,on_blocks_tick:i64,delay_ms:i64,route:i32x64"
+       &ration:i32,route_len:i32,route_pos:i32,pax:i32,touchdown_tick:i64,on_blocks_tick:i64,delay_ms:i64,held:i32,ready_tick:i64,a&
+       &irborne_tick:i64,route:i32x64"
       !! Layout identity. Any change to the field list changes it, which
       !! retires every older checkpoint through the ordinary mismatch path.
 
@@ -67,6 +70,12 @@ module core_aircraft
          !! Sim time the aircraft parked.
       integer(int64), allocatable :: delay_ms(:)
          !! Accrued delay in milliseconds.
+      integer(int32), allocatable :: held(:)
+         !! Non-zero while the player is holding this departure on its stand.
+      integer(int64), allocatable :: ready_tick(:)
+         !! Sim time the turnaround finished and pushback was first wanted.
+      integer(int64), allocatable :: airborne_tick(:)
+         !! Sim time the departure left the ground.
       integer(int32), allocatable :: route(:, :)
          !! Planned taxi route, one column per aircraft. Shape (AIRCRAFT_ROUTE_ROWS, capacity).
       integer(default_int) :: n = 0_default_int
@@ -119,6 +128,9 @@ contains
          this%touchdown_tick(cap), &
          this%on_blocks_tick(cap), &
          this%delay_ms(cap), &
+         this%held(cap), &
+         this%ready_tick(cap), &
+         this%airborne_tick(cap), &
          this%route(AIRCRAFT_ROUTE_ROWS, cap), &
          stat=status)
       if (status /= 0) then
@@ -138,6 +150,9 @@ contains
       this%touchdown_tick = 0_int64
       this%on_blocks_tick = 0_int64
       this%delay_ms = 0_int64
+      this%held = 0_int32
+      this%ready_tick = 0_int64
+      this%airborne_tick = 0_int64
       this%route = NO_ID
       this%n = 0_default_int
       this%cap = cap
@@ -262,6 +277,21 @@ contains
          if (present(err)) err = fault
          return
       end if
+      call soa_write_field(stream, this%held, this%n, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+      call soa_write_field(stream, this%ready_tick, this%n, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+      call soa_write_field(stream, this%airborne_tick, this%n, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
 
       ! A matrix goes out as one flat record of ROWS*n elements, in Fortran
       ! column-major order, so reading it back is a reshape and not a guess.
@@ -306,6 +336,9 @@ contains
       integer(int64), allocatable :: buffer_touchdown_tick(:)
       integer(int64), allocatable :: buffer_on_blocks_tick(:)
       integer(int64), allocatable :: buffer_delay_ms(:)
+      integer(int32), allocatable :: buffer_held(:)
+      integer(int64), allocatable :: buffer_ready_tick(:)
+      integer(int64), allocatable :: buffer_airborne_tick(:)
       integer(int32), allocatable :: buffer_route(:)
 
       stream = int(unit, default_int)
@@ -381,6 +414,21 @@ contains
          if (present(err)) err = fault
          return
       end if
+      call soa_read_field(stream, "held", buffer_held, n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+      call soa_read_field(stream, "ready_tick", buffer_ready_tick, n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
+      call soa_read_field(stream, "airborne_tick", buffer_airborne_tick, n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
 
       call soa_read_field(stream, "route", buffer_route, &
                           AIRCRAFT_ROUTE_ROWS*n, swapped, fault)
@@ -403,6 +451,9 @@ contains
       this%touchdown_tick(1:n) = buffer_touchdown_tick
       this%on_blocks_tick(1:n) = buffer_on_blocks_tick
       this%delay_ms(1:n) = buffer_delay_ms
+      this%held(1:n) = buffer_held
+      this%ready_tick(1:n) = buffer_ready_tick
+      this%airborne_tick(1:n) = buffer_airborne_tick
       this%route(:, 1:n) = reshape(buffer_route, [AIRCRAFT_ROUTE_ROWS, n])
       this%n = n
    end subroutine aircraft_deserialize
@@ -435,6 +486,9 @@ contains
       call soa_hash_field(hasher, this%touchdown_tick, this%n)
       call soa_hash_field(hasher, this%on_blocks_tick, this%n)
       call soa_hash_field(hasher, this%delay_ms, this%n)
+      call soa_hash_field(hasher, this%held, this%n)
+      call soa_hash_field(hasher, this%ready_tick, this%n)
+      call soa_hash_field(hasher, this%airborne_tick, this%n)
       flat = reshape(this%route(:, 1:this%n), [AIRCRAFT_ROUTE_ROWS*this%n])
       call soa_hash_field(hasher, flat, AIRCRAFT_ROUTE_ROWS*this%n)
       digest = hasher%digest()
@@ -456,6 +510,9 @@ contains
       if (allocated(this%touchdown_tick)) deallocate (this%touchdown_tick)
       if (allocated(this%on_blocks_tick)) deallocate (this%on_blocks_tick)
       if (allocated(this%delay_ms)) deallocate (this%delay_ms)
+      if (allocated(this%held)) deallocate (this%held)
+      if (allocated(this%ready_tick)) deallocate (this%ready_tick)
+      if (allocated(this%airborne_tick)) deallocate (this%airborne_tick)
       if (allocated(this%route)) deallocate (this%route)
       this%n = 0_default_int
       this%cap = 0_default_int

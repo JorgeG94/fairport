@@ -57,7 +57,16 @@ if [ -n "$hits" ]; then
   report "core/ reaches for wall time or a non-reproducible deviate" "$hits"
 fi
 
-# 4. core/ holds no reals in canonical state.
+# 4. core/ does not parse TOML.
+#
+# toml-f allocates, reads files and carries its own error type -- three things
+# core/ does not do. The schedule is app/'s to read and core/'s to receive.
+hits=$(scan src/core/ '^ *use +tomlf')
+if [ -n "$hits" ]; then
+  report "core/ uses the TOML parser" "$hits"
+fi
+
+# 5. core/ holds no reals in canonical state.
 #
 # Positions are integer centimetres, money is integer cents, time is integer
 # milliseconds. A real that reaches simulation state is a determinism bug

@@ -1,0 +1,75 @@
+# A day at SIMPLE: one runway, six stands, two banks.
+#
+# Movements can be written either way, and both forms are here on purpose.
+#
+#   [[arrival]]  pins one movement exactly. Use it when a scenario or a test
+#                needs to name an aircraft and have it mean the same thing
+#                every run. Pinned movements load first, so their handles are
+#                1, 2, 3... whatever the banks do afterwards.
+#
+#   [[bank]]     states volume and shape. The loader draws individual times
+#                from the schedule's own random stream, sorts them, then draws
+#                a wake category per slot. Reproducible from the seed, but not
+#                readable off the page -- which is the trade.
+#
+# Times are HH:MM or HH:MM:SS on the scenario clock. `wake_mix` is relative
+# weights for light, medium, heavy and super.
+
+name = "Day 1, single runway"
+
+# ---------------------------------------------------------------- pinned ----
+# The four aircraft from clear_day, so a command naming aircraft 1 still means
+# QFA412 after the banks below are resized.
+
+[[arrival]]
+callsign = "QFA412"
+wake = "H"
+pax = 240
+at = "06:45"
+runway = 1
+
+[[arrival]]
+callsign = "VOZ881"
+wake = "M"
+pax = 170
+at = "06:52"
+runway = 1
+
+[[arrival]]
+callsign = "UAE414"
+wake = "S"
+pax = 380
+at = "06:58"
+runway = 1
+
+[[arrival]]
+callsign = "JST615"
+wake = "M"
+pax = 186
+at = "07:04"
+runway = 1
+
+# ----------------------------------------------------------------- banks ----
+# The morning wave is the heavy one: long-haul arrives early, and the Super
+# stand is contended. The evening wave is lighter and mostly domestic.
+#
+# Six stands against these counts is deliberately not enough. Watching where
+# the queue forms is the point of the milestone.
+
+[[bank]]
+kind = "arrival"
+prefix = "MOR"
+from = "07:10"
+to = "09:30"
+count = 26
+runway = 1
+wake_mix = [1, 7, 3, 1]
+
+[[bank]]
+kind = "arrival"
+prefix = "EVE"
+from = "17:00"
+to = "19:45"
+count = 22
+runway = 1
+wake_mix = [2, 9, 2, 0]

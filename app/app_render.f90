@@ -11,9 +11,9 @@ module app_render
    !! verbosity are separable and a future interactive frame can silence the
    !! console without losing the log.
    use core_sim, only: sim_t, aircraft_view_t, gate_view_t, query_aircraft, query_gates, &
-                       tick_k, id_k, NO_ID, phase_name, wake_letter, PHASE_AT_GATE
+                       tick_k, id_k, NO_ID, phase_name, wake_letter
    use app_text, only: int_text, pad_left, pad_right, clock_text, duration_text
-   use pic_types, only: default_int, int64
+   use pic_types, only: default_int, int32, int64
    use pic_logger, only: logger => global_logger
    implicit none
    private
@@ -45,18 +45,18 @@ contains
                        "   ARR "//int_text(int(sim%world%arr_rate_per_hour, int64))//"/hr"// &
                        "   DEP "//int_text(int(sim%world%dep_rate_per_hour, int64))//"/hr")
       call logger%info("")
-      call logger%info(" #  CALL      TYPE  PHASE      NODE  GATE  TD        ONBLK     TAXI")
+      call logger%info(" #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY")
 
       do i = 1_default_int, n_aircraft
          row = " "//pad_left(int_text(int(i, int64)), 2_default_int)// &
                "  "//pad_right(trim(aircraft(i)%callsign), 8_default_int)// &
                "  "//wake_letter(aircraft(i)%wake)// &
-               "     "//pad_right(phase_name(aircraft(i)%phase), 9_default_int)// &
-               "  "//pad_left(int_text(int(aircraft(i)%node, int64)), 4_default_int)// &
+               "     "//pad_right(phase_name(aircraft(i)%phase), 10_default_int)// &
                "  "//pad_left(gate_label(gates, n_gates, aircraft(i)%gate), 4_default_int)// &
                "  "//clock_text(aircraft(i)%touchdown_tick)// &
                "  "//on_blocks_text(aircraft(i))// &
-               "  "//taxi_text(aircraft(i))
+               "  "//clock_or_dashes(aircraft(i)%airborne_tick)// &
+               "  "//pad_left(delay_text(aircraft(i)), 6_default_int)
          call logger%info(row)
       end do
 
@@ -79,17 +79,26 @@ contains
          !! Simulation to report on.
 
       type(aircraft_view_t) :: aircraft(MAX_VIEWS)
-      integer(default_int) :: n_aircraft, i, parked
-      integer(int64) :: total_taxi
+      integer(default_int) :: n_aircraft, i, parked, departed
+      integer(int64) :: total_taxi, total_delay, worst_delay
 
       call query_aircraft(sim%world, aircraft, n_aircraft)
 
       parked = 0_default_int
+      departed = 0_default_int
       total_taxi = 0_int64
+      total_delay = 0_int64
+      worst_delay = 0_int64
       do i = 1_default_int, n_aircraft
-         if (aircraft(i)%phase /= PHASE_AT_GATE) cycle
-         parked = parked + 1_default_int
-         total_taxi = total_taxi + (aircraft(i)%on_blocks_tick - aircraft(i)%touchdown_tick)
+         if (aircraft(i)%on_blocks_tick > 0_tick_k) then
+            parked = parked + 1_default_int
+            total_taxi = total_taxi + (aircraft(i)%on_blocks_tick - aircraft(i)%touchdown_tick)
+         end if
+         if (aircraft(i)%airborne_tick > 0_tick_k) then
+            departed = departed + 1_default_int
+            total_delay = total_delay + aircraft(i)%delay_ms
+            worst_delay = max(worst_delay, aircraft(i)%delay_ms)
+         end if
       end do
 
       call logger%info("")
@@ -97,13 +106,29 @@ contains
       call logger%info("  sim time          "//clock_text(sim%world%now))
       call logger%info("  aircraft          "//int_text(int(n_aircraft, int64)))
       call logger%info("  parked            "//int_text(int(parked, int64)))
+      call logger%info("  departed          "//int_text(int(departed, int64)))
       if (parked > 0_default_int) then
          call logger%info("  mean gate-in      "//duration_text(total_taxi/int(parked, int64)))
+      end if
+      if (departed > 0_default_int) then
+         ! Total delay minutes is the milestone 1 score. Mean and worst say
+         ! different things: a good mean with a terrible worst is one aircraft
+         ! that never got a slot.
+         call logger%info("  mean dep delay    "//duration_text(total_delay/int(departed, int64)))
+         call logger%info("  worst dep delay   "//duration_text(worst_delay))
+         call logger%info("  total dep delay   "//int_text(total_delay/60000_int64)//" min")
       end if
       call logger%info("  events dispatched "//int_text(sim%log%count()))
       call logger%info("  events tombstoned "//int_text(sim%log%stale_count()))
       call logger%info("  events scheduled  "//int_text(int(sim%sched%scheduled_total(), int64)))
+      call logger%info("  commands issued   "//int_text(int(sim%world%commands%size(), int64)))
+      call logger%info("  command log hash  "//sim%world%commands%digest_hex())
       call logger%info("  event log hash    "//sim%log%digest_hex())
+      ! The seed and the command log are the session's identity; the event log
+      ! hash is what that identity produced. A replay that matches the first
+      ! two and not the third is a divergence in the simulation rather than in
+      ! the input, which is the distinction worth being able to make.
+      call logger%info("  seed              "//int_text(sim%seed))
       call logger%info("")
    end subroutine render_stats
 
@@ -147,24 +172,37 @@ contains
          !! Aircraft to describe.
       character(len=8) :: text
 
-      if (view%on_blocks_tick == 0_tick_k) then
+      text = clock_or_dashes(view%on_blocks_tick)
+   end function on_blocks_text
+
+   pure function clock_or_dashes(tick) result(text)
+      !! A clock time, or dashes for an event that has not happened.
+      integer(tick_k), intent(in) :: tick
+         !! Sim time, or zero for "not yet".
+      character(len=8) :: text
+
+      if (tick == 0_tick_k) then
          text = "--:--:--"
          return
       end if
-      text = clock_text(view%on_blocks_tick)
-   end function on_blocks_text
+      text = clock_text(tick)
+   end function clock_or_dashes
 
-   pure function taxi_text(view) result(text)
-      !! Touchdown to on-blocks, or a dash if still moving.
+   pure function delay_text(view) result(text)
+      !! Ready-to-airborne delay, a hold marker, or a dash.
       type(aircraft_view_t), intent(in) :: view
          !! Aircraft to describe.
       character(len=:), allocatable :: text
 
-      if (view%on_blocks_tick == 0_tick_k) then
+      if (view%held /= 0_int32) then
+         text = "HELD"
+         return
+      end if
+      if (view%airborne_tick == 0_tick_k) then
          text = "-"
          return
       end if
-      text = duration_text(view%on_blocks_tick - view%touchdown_tick)
-   end function taxi_text
+      text = duration_text(view%delay_ms)
+   end function delay_text
 
 end module app_render

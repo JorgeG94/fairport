@@ -11,6 +11,7 @@ module core_world
    !! rather than a protocol negotiated across a dozen modules.
    use core_kinds, only: tick_k, id_k, int32, int64, NO_ID
    use core_aircraft, only: aircraft_soa_t
+   use core_command, only: command_log_t
    use core_graph, only: taxi_graph_t
    use pic_types, only: default_int
    use pic_error, only: error_t, error_raise, ERROR_ALLOC, ERROR_VALIDATION
@@ -21,6 +22,8 @@ module core_world
    public :: CALLSIGN_LEN
    public :: PHASE_INBOUND, PHASE_APPROACH, PHASE_LANDING, PHASE_ROLLOUT
    public :: PHASE_TAXI_IN, PHASE_AT_GATE, PHASE_DIVERTED
+   public :: PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT
+   public :: PHASE_LINEUP, PHASE_TAKEOFF, PHASE_DEPARTED
    public :: WAKE_LIGHT, WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER
    public :: phase_name, wake_letter
 
@@ -37,6 +40,15 @@ module core_world
    integer(int32), parameter :: PHASE_TAXI_IN = 4_int32
    integer(int32), parameter :: PHASE_AT_GATE = 5_int32
    integer(int32), parameter :: PHASE_DIVERTED = 6_int32
+   ! The departure half. Appended rather than inserted: these numbers are in
+   ! every checkpoint and every saved board.
+   integer(int32), parameter :: PHASE_TURNAROUND = 7_int32
+   integer(int32), parameter :: PHASE_READY = 8_int32
+   integer(int32), parameter :: PHASE_PUSHBACK = 9_int32
+   integer(int32), parameter :: PHASE_TAXI_OUT = 10_int32
+   integer(int32), parameter :: PHASE_LINEUP = 11_int32
+   integer(int32), parameter :: PHASE_TAKEOFF = 12_int32
+   integer(int32), parameter :: PHASE_DEPARTED = 13_int32
 
    ! Wake turbulence categories. The numbering is the index into the
    ! separation matrix, so it must stay dense and ascending by size.
@@ -99,6 +111,12 @@ module core_world
          !! Cash on hand. Milestone 2.
       integer(int32) :: reputation = 500_int32
          !! Reputation, 0 to 1000. Milestone 2.
+
+      type(command_log_t) :: commands
+         !! Every command the player has issued. Canonical state, and the other
+         !! half of `(seed, command log)`. It lives here rather than in `sim_t`
+         !! so that a handler resolving a command's payload index can reach it
+         !! through the world it is already given.
 
       type(taxi_graph_t) :: graph
          !! Static taxiway topology.
@@ -245,6 +263,7 @@ contains
       class(world_t), intent(inout) :: this
 
       call this%aircraft%destroy()
+      call this%commands%destroy()
       call this%graph%destroy()
       call destroy_arrays(this)
       this%now = 0_tick_k
@@ -271,6 +290,20 @@ contains
          name = "at_gate"
       case (PHASE_DIVERTED)
          name = "diverted"
+      case (PHASE_TURNAROUND)
+         name = "turnaround"
+      case (PHASE_READY)
+         name = "ready"
+      case (PHASE_PUSHBACK)
+         name = "pushback"
+      case (PHASE_TAXI_OUT)
+         name = "taxi_out"
+      case (PHASE_LINEUP)
+         name = "lineup"
+      case (PHASE_TAKEOFF)
+         name = "takeoff"
+      case (PHASE_DEPARTED)
+         name = "departed"
       case default
          name = "unknown"
       end select

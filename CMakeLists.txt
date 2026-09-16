@@ -29,8 +29,8 @@ set(FAIRPORT_PIC_REPOSITORY
     "https://github.com/JorgeG94/pic.git"
     CACHE STRING "Git repository to fetch pic from")
 set(FAIRPORT_PIC_TAG
-    "1256ca40"
-    CACHE STRING "pic commit to pin; v0.8.0")
+    "6543759b"
+    CACHE STRING "pic commit to pin; v0.8.1")
 
 include(FetchContent)
 
@@ -45,6 +45,24 @@ FetchContent_Declare(
   GIT_REPOSITORY "${FAIRPORT_PIC_REPOSITORY}"
   GIT_TAG "${FAIRPORT_PIC_TAG}")
 FetchContent_MakeAvailable(pic)
+
+# toml-f reads the schedule. Pinned to a release tag rather than a branch, for
+# the same reason pic is pinned to a SHA: a dependency that moves underneath a
+# build can change what a scenario does without anything in this repository
+# changing.
+#
+# Only `app/` may use it. A TOML parser allocates, raises its own errors and
+# reads files -- three things `core/` does not do -- and the layering check
+# enforces that.
+set(FAIRPORT_TOMLF_TAG
+    "v0.5.2"
+    CACHE STRING "toml-f release to pin")
+
+FetchContent_Declare(
+  toml-f
+  GIT_REPOSITORY "https://github.com/toml-f/toml-f.git"
+  GIT_TAG "${FAIRPORT_TOMLF_TAG}")
+FetchContent_MakeAvailable(toml-f)
 
 # pic writes its .mod files to ${CMAKE_BINARY_DIR}/modules, and fairport joins
 # it there so that one include directory covers both.

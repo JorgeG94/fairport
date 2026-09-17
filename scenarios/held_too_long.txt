@@ -1,0 +1,48 @@
+# What holding an arrival costs.
+#
+# `hold_arrival` takes an aircraft out of the landing order. It does not take
+# it out of the sky: it keeps flying circuits, keeps burning fuel, and diverts
+# at bingo like anybody else. That is the whole point. Holding is how a
+# controller buys room, and the room is bought with somebody's fuel.
+#
+# Left alone, this day loses five:
+#
+#   MOR011 (M)  MOR014 (M)  MOR015 (H)  MOR017 (M)  MOR020 (H)
+#
+# MOR018 is not among them. It is a Medium in the middle of the morning bank,
+# in no trouble at all, and holding it for the rest of the day loses it:
+#
+#   baseline              five diversions
+#   hold_arrival 22       six, and the sixth is MOR018
+#
+# Nothing was gained. No aircraft landed that would not have landed anyway --
+# the stack was already longer than the runway, so the slot MOR018 gave up went
+# to somebody who was going to get one regardless. It is a pure loss, and it is
+# the loss you take every time you hold an aircraft and then stop thinking
+# about it.
+#
+# The interesting version is `at 08:00 hold_arrival 17`, which still loses
+# five. MOR013 dies and MOR014 lives. MOR013 is the Super, carrying five
+# hundred people instead of a hundred and eighty, and that trade is the same
+# one `costly_favour.txt` makes from the other direction: there the player
+# promotes an aircraft and costs the Super its slot, here they hold the Super
+# and cost it directly. Two commands, opposite in shape, identical in outcome.
+#
+# There is no release here, which is the mistake being demonstrated. A held
+# aircraft is not a parked one, and nothing reminds you.
+#
+#   fairport scenarios/full_day.txt        --seed 42
+#   fairport scenarios/held_too_long.txt   --seed 42
+
+seed 42
+max_aircraft 128
+load airport data/airports/simple.airport
+load schedule data/schedules/day1.toml
+
+# MOR018 is aircraft 22. Out of the landing order, and never let back in.
+at 08:00 hold_arrival 22
+
+run until 21:00
+
+board
+dump stats

@@ -315,11 +315,11 @@ contains
          case ("j")
             call move_selection(sim, ui, 1_default_int)
          case ("h")
-            call issue(sim, ui, "hold_departure", 0_id_k)
+            call by_phase(sim, ui, "hold_arrival", "hold_departure", 0_id_k)
          case ("r")
-            call issue(sim, ui, "release_departure", 0_id_k)
+            call by_phase(sim, ui, "release_arrival", "release_departure", 0_id_k)
          case ("f")
-            call sequence_to_front(sim, ui)
+            call by_phase(sim, ui, "sequence_arrival", "sequence_departure", 1_id_k)
          case (":")
             ui%typing = .true.
             ui%entry = ""
@@ -426,16 +426,27 @@ contains
       call send(sim, ui, command)
    end subroutine issue
 
-   subroutine sequence_to_front(sim, ui)
-      !! Put the selected aircraft at the head of whichever queue it is in.
+   subroutine by_phase(sim, ui, arrival_form, departure_form, b)
+      !! Issue whichever of a pair of commands fits what the aircraft is doing.
       !!
-      !! Which queue that is follows from its phase, so the player presses one
-      !! key and means the obvious thing. An aircraft in neither queue is told
-      !! so rather than silently given a command that cannot apply.
+      !! `h` means hold whatever is selected, and what holding means depends on
+      !! where the aircraft is: a departure waits on its stand and costs delay,
+      !! an arrival stays in the stack and costs fuel. The player presses one
+      !! key and means the obvious thing; the difference in what it costs shows
+      !! up in the report rather than in the keyboard.
+      !!
+      !! An aircraft in neither state is told so rather than quietly given a
+      !! command that could not apply.
       type(sim_t), intent(inout) :: sim
          !! Simulation to issue the command against.
       type(ui_t), intent(inout) :: ui
          !! Board state.
+      character(len=*), intent(in) :: arrival_form
+         !! Command to use when the selection is still flying.
+      character(len=*), intent(in) :: departure_form
+         !! Command to use when it is on the ground and going again.
+      integer(id_k), intent(in) :: b
+         !! Second argument, or zero.
 
       type(aircraft_view_t) :: view
       logical :: found
@@ -448,13 +459,14 @@ contains
 
       select case (view%phase)
       case (PHASE_INBOUND, PHASE_APPROACH, PHASE_HOLDING)
-         call issue(sim, ui, "sequence_arrival", 1_id_k)
+         call issue(sim, ui, arrival_form, b)
       case (PHASE_TURNAROUND, PHASE_READY, PHASE_PUSHBACK, PHASE_TAXI_OUT, PHASE_LINEUP)
-         call issue(sim, ui, "sequence_departure", 1_id_k)
+         call issue(sim, ui, departure_form, b)
       case default
-         ui%message = trim(view%callsign)//" is not in a queue"
+         ui%message = trim(view%callsign)//" is "//trim(phase_name(view%phase))// &
+                      "; there is nothing to do to it"
       end select
-   end subroutine sequence_to_front
+   end subroutine by_phase
 
    subroutine send(sim, ui, command)
       !! Hand a built command to the simulation and say what happened.

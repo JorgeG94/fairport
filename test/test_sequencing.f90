@@ -19,7 +19,8 @@ module test_sequencing
    use core_command, only: command_t
    use core_event_kinds, only: K_CMD_SEQUENCE_ARRIVAL, K_CMD_SEQUENCE_DEPARTURE, &
                                K_CMD_HOLD_DEPARTURE, K_CMD_RELEASE_DEPARTURE, &
-                               K_CMD_SET_VISIBILITY
+                               K_CMD_SET_VISIBILITY, K_CMD_HOLD_ARRIVAL, &
+                               K_CMD_RELEASE_ARRIVAL
    use core_kinds, only: tick_k, id_k, int16, int32, int64, NO_ID
    use core_sim, only: sim_t, HOUR, MINUTE, SECOND, DEFAULT_FUEL_MS, &
                        WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER, &
@@ -52,7 +53,10 @@ contains
                   new_unittest("zero_puts_it_back_in_the_pack", test_unsequence), &
                   new_unittest("a_clearance_is_never_wasted", test_no_wasted_slot), &
                   new_unittest("a_stand_must_fit_the_aircraft_cleared", test_stand_fits), &
-                  new_unittest("departure_order_follows_the_player", test_departure_order) &
+                  new_unittest("departure_order_follows_the_player", test_departure_order), &
+                  new_unittest("a_held_arrival_is_never_cleared", test_hold_arrival), &
+                  new_unittest("releasing_puts_it_back_in_the_running", test_release_arrival), &
+                  new_unittest("holding_an_arrival_can_lose_it", test_hold_costs_the_aircraft) &
                   ]
    end subroutine collect_sequencing_tests
 
@@ -130,6 +134,124 @@ contains
                                      6_tick_k*HOUR + int(i, tick_k)*1_tick_k*MINUTE, err)
       end do
    end subroutine build_with_stands
+
+   subroutine test_hold_arrival(error)
+      !! A held arrival is passed over, however good its place in the order.
+      !!
+      !! The strong form on purpose: the aircraft is put at position 1, which
+      !! is the front of the landing order, and still does not land. If the
+      !! hold were implemented as a nudge down the order rather than a refusal,
+      !! this is the test that would catch it.
+      type(error_type), allocatable, intent(out) :: error
+
+      type(sim_t), target :: sim
+      type(error_t) :: err
+
+      call build(sim, 42_int64, [WAKE_MEDIUM, WAKE_MEDIUM], err)
+      call sim%run_until(6_tick_k*HOUR, err)
+
+      call sequence(sim, K_CMD_SEQUENCE_ARRIVAL, 1_id_k, 1_id_k, err)
+      call one_argument(sim, K_CMD_HOLD_ARRIVAL, 1_id_k, err)
+      call sim%run_until(8_tick_k*HOUR, err)
+
+      call check(error, sim%world%aircraft%hold_ordered(1) /= 0_int32, &
+                 "the hold was not recorded")
+      if (allocated(error)) return
+      call check(error, sim%world%aircraft%touchdown_tick(1) == 0_tick_k, &
+                 "a held arrival was cleared to land from the front of the order")
+      if (allocated(error)) return
+      ! Not vacuous: the other aircraft has to have got in, or a fixture where
+      ! nobody lands would pass this perfectly.
+      call check(error, sim%world%aircraft%touchdown_tick(2) > 0_tick_k, &
+                 "nobody landed at all, so the hold proves nothing")
+
+      call sim%destroy()
+   end subroutine test_hold_arrival
+
+   subroutine test_release_arrival(error)
+      !! Releasing a held arrival puts it back in the running.
+      type(error_type), allocatable, intent(out) :: error
+
+      type(sim_t), target :: sim
+      type(error_t) :: err
+
+      call build(sim, 42_int64, [WAKE_MEDIUM, WAKE_MEDIUM], err)
+      call sim%run_until(6_tick_k*HOUR, err)
+
+      call one_argument(sim, K_CMD_HOLD_ARRIVAL, 1_id_k, err)
+
+      ! Well inside the forty-five minutes of holding fuel. Released later than
+      ! that there is nothing to release: the aircraft has already gone, and
+      ! this would be testing the diversion path instead.
+      call sim%run_until(6_tick_k*HOUR + 20_tick_k*MINUTE, err)
+      call check(error, sim%world%aircraft%touchdown_tick(1) == 0_tick_k, &
+                 "the held aircraft landed before it was released")
+      if (allocated(error)) return
+
+      call one_argument(sim, K_CMD_RELEASE_ARRIVAL, 1_id_k, err)
+      call sim%run_until(10_tick_k*HOUR, err)
+
+      call check(error, sim%world%aircraft%hold_ordered(1) == 0_int32, &
+                 "the release did not clear the hold")
+      if (allocated(error)) return
+      call check(error, sim%world%aircraft%touchdown_tick(1) > 0_tick_k, &
+                 "a released aircraft never landed")
+
+      call sim%destroy()
+   end subroutine test_release_arrival
+
+   subroutine test_hold_costs_the_aircraft(error)
+      !! An arrival held long enough runs out of fuel and diverts.
+      !!
+      !! This is the property the command exists to have. A hold that could not
+      !! end in a diversion would be a free action, and a free action is not a
+      !! decision -- the player would hold everything and sort it out later.
+      type(error_type), allocatable, intent(out) :: error
+
+      type(sim_t), target :: unattended, held
+      type(error_t) :: err
+
+      ! Two aircraft and one stand, which on its own loses nobody: the apron
+      ! buffer absorbs the second. Whatever is lost here is lost because of the
+      ! command.
+      call build(unattended, 42_int64, [WAKE_MEDIUM, WAKE_MEDIUM], err)
+      call unattended%run_until(12_tick_k*HOUR, err)
+      call check(error, unattended%world%aircraft%phase(1) /= PHASE_DIVERTED, &
+                 "the fixture loses this aircraft with no command at all")
+      if (allocated(error)) return
+
+      call build(held, 42_int64, [WAKE_MEDIUM, WAKE_MEDIUM], err)
+      call held%run_until(6_tick_k*HOUR, err)
+      call one_argument(held, K_CMD_HOLD_ARRIVAL, 1_id_k, err)
+      call held%run_until(12_tick_k*HOUR, err)
+
+      call check(error, held%world%aircraft%phase(1) == PHASE_DIVERTED, &
+                 "an arrival held for six hours did not run out of fuel")
+      if (allocated(error)) return
+      ! Still held when it went, which is what the report reads to say the
+      ! diversion happened under the player's hold.
+      call check(error, held%world%aircraft%hold_ordered(1) /= 0_int32, &
+                 "the hold was cleared somewhere along the way")
+
+      call held%destroy()
+      call unattended%destroy()
+   end subroutine test_hold_costs_the_aircraft
+
+   subroutine one_argument(sim, command_kind, aircraft, err)
+      !! Submit a one-argument command.
+      type(sim_t), intent(inout) :: sim
+      integer(int16), intent(in) :: command_kind
+         !! Command identifier.
+      integer(id_k), intent(in) :: aircraft
+         !! Subject.
+      type(error_t), intent(inout) :: err
+
+      type(command_t) :: command
+
+      command%kind = command_kind
+      command%a = aircraft
+      call sim%submit(command, err)
+   end subroutine one_argument
 
    subroutine sequence(sim, command_kind, aircraft, position, err)
       !! Submit a two-argument sequencing command.

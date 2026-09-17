@@ -1,11 +1,11 @@
 
  FAIRPORT            09:00:00     VIS 10000m   ARR 30/hr   DEP 30/hr
 
- #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY
-  1  QFA412    H     departed      --  06:45:00  06:47:49  07:53:59   4m51s
-  2  VOZ881    M     departed      --  06:52:00  06:54:19  07:33:49   4m17s
-  3  UAE414    S     departed      --  06:58:00  07:00:43  08:35:51   4m43s
-  4  JST615    M     departed      --  07:04:00  07:06:53  07:49:40   4m54s
+ #  CALL      TYPE  PHASE      H  GATE  TD        ONBLK     OFF       DLY
+  1  QFA412    H     departed        --  06:45:00  06:47:49  07:53:59   4m51s
+  2  VOZ881    M     departed        --  06:52:00  06:54:19  07:33:49   4m17s
+  3  UAE414    S     departed        --  06:58:00  07:00:43  08:35:51   4m43s
+  4  JST615    M     departed        --  07:04:00  07:06:53  07:49:40   4m54s
 
  GATES  A1[------] A2[------] A3[------] B1[------] B2[------] B3[------]
 

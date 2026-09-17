@@ -1,0 +1,70 @@
+
+ FAIRPORT            21:00:00     VIS 10000m   ARR 30/hr   DEP 30/hr
+
+ #  CALL      TYPE  PHASE      H  GATE  TD        ONBLK     OFF       DLY
+  1  QFA412    H     departed        --  06:45:00  06:47:49  07:55:04   5m55s
+  2  VOZ881    M     departed        --  06:52:00  06:54:19  07:33:49   4m17s
+  3  UAE414    S     departed        --  06:58:00  07:00:43  08:41:06   9m57s
+  4  JST615    M     departed        --  07:04:00  07:06:53  07:51:13   6m26s
+  5  MOR001    M     departed        --  07:12:15  07:15:43  08:00:01   6m21s
+  6  MOR002    M     departed        --  07:14:26  07:51:20  08:33:14   4m54s
+  7  MOR003    M     departed        --  07:19:58  07:34:28  08:14:35   4m23s
+  8  MOR004    M     departed        --  07:34:49  07:55:35  08:39:06   8m25s
+  9  MOR005    H     departed        --  07:47:21  08:39:24  09:45:18   4m51s
+ 10  MOR006    M     departed        --  07:52:13  08:01:21  08:46:57   5m35s
+ 11  MOR007    L     departed        --  07:38:49  07:42:26  08:17:47   7m35s
+ 12  MOR008    M     departed        --  07:57:04  08:16:23  08:56:26   4m17s
+ 13  MOR009    M     departed        --  08:11:43  08:40:23  09:20:35   4m43s
+ 14  MOR010    M     departed        --  08:13:50  08:38:31  09:22:35   5m37s
+ 15  MOR011    M     diverted        --  00:00:00  --:--:--  --:--:--       -
+ 16  MOR012    M     departed        --  08:29:52  08:48:59  09:29:42   5m27s
+ 17  MOR013    S     departed        --  08:34:14  10:31:54  12:10:50   4m43s
+ 18  MOR014    M     diverted        --  00:00:00  --:--:--  --:--:--       -
+ 19  MOR015    H     diverted        --  00:00:00  --:--:--  --:--:--       -
+ 20  MOR016    M     departed        --  08:44:06  08:56:49  09:37:43   4m17s
+ 21  MOR017    M     diverted        --  00:00:00  --:--:--  --:--:--       -
+ 22  MOR018    L     diverted   H    --  00:00:00  --:--:--  --:--:--       -
+ 23  MOR019    H     departed        --  08:58:26  09:22:55  10:30:26   4m43s
+ 24  MOR020    H     diverted        --  00:00:00  --:--:--  --:--:--       -
+ 25  EVE001    M     departed        --  17:17:06  17:19:19  18:01:36   4m17s
+ 26  EVE002    M     departed        --  17:19:12  17:22:03  18:07:44   6m13s
+ 27  EVE003    M     departed        --  17:23:56  17:27:20  18:12:42   7m09s
+ 28  EVE004    M     departed        --  17:26:03  17:28:50  18:14:42   7m40s
+ 29  EVE005    M     departed        --  17:35:05  17:37:49  18:19:52   6m54s
+ 30  EVE006    M     departed        --  17:39:21  18:07:31  18:51:31   7m36s
+ 31  EVE007    M     departed        --  17:48:11  18:02:41  18:46:46   4m42s
+ 32  EVE008    M     departed        --  18:02:36  18:15:19  18:57:51   6m37s
+ 33  EVE009    M     departed        --  18:04:47  18:13:40  18:55:51   4m51s
+ 34  EVE010    M     departed        --  18:09:44  18:19:30  19:03:59   4m43s
+ 35  EVE011    L     departed        --  18:12:57  18:16:35  18:49:31   6m37s
+ 36  EVE012    M     departed        --  18:16:57  18:58:33  19:39:44   4m51s
+ 37  EVE013    M     departed        --  18:20:57  18:51:56  19:35:34   4m17s
+ 38  EVE014    M     departed        --  18:43:50  18:51:30  19:32:50   4m54s
+ 39  EVE015    M     departed        --  18:47:46  19:00:26  19:44:23   5m27s
+ 40  EVE016    M     departed        --  18:56:51  19:05:30  19:46:31   4m43s
+
+ GATES  A1[------] A2[------] A3[------] B1[------] B2[------] B3[------]
+
+
+ ---- stats ----
+  sim time          21:00:00
+  aircraft          40
+  parked            34
+  departed          34
+  DIVERTED          6
+    held at bingo   1
+  holding circuits  166
+  mean taxi-in      5m17s
+  mean stand wait   12m05s
+  worst stand wait  112m00s
+  mean dep delay    5m42s
+  worst dep delay   9m57s
+  total dep delay   194 min
+  events dispatched 1483
+  events tombstoned 34
+  events scheduled  1517
+  commands issued   1
+  command log hash  b4506a141585c45f
+  event log hash    1a2d87530c78bb32
+  seed              42
+

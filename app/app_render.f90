@@ -85,7 +85,7 @@ contains
                 "   DEP "//int_text(int(sim%world%dep_rate_per_hour, int64))//"/hr")
       call emit(lines, n_lines, "")
       call emit(lines, n_lines, &
-                " #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY")
+                " #  CALL      TYPE  PHASE      H  GATE  TD        ONBLK     OFF       DLY")
 
       do i = 1_default_int, n_aircraft
          row = cursor_mark(aircraft(i)%id, selected)// &
@@ -93,6 +93,7 @@ contains
                "  "//pad_right(trim(aircraft(i)%callsign), 8_default_int)// &
                "  "//wake_letter(aircraft(i)%wake)// &
                "     "//pad_right(phase_name(aircraft(i)%phase), 10_default_int)// &
+               " "//hold_flag(aircraft(i))// &
                "  "//pad_left(gate_label(gates, n_gates, aircraft(i)%gate), 4_default_int)// &
                "  "//clock_text(aircraft(i)%touchdown_tick)// &
                "  "//on_blocks_text(aircraft(i))// &
@@ -110,6 +111,22 @@ contains
       call emit(lines, n_lines, row)
       call emit(lines, n_lines, "")
    end subroutine board_lines
+
+   pure function hold_flag(view) result(flag)
+      !! `H` while the player is holding this aircraft, blank otherwise.
+      !!
+      !! One column for both kinds of hold. They are different fields owned by
+      !! different systems, but to whoever is reading the board they are the
+      !! same fact: this one is waiting because you said so. Holding a
+      !! departure costs delay; holding an arrival costs fuel and can end in a
+      !! diversion, which the report then puts against your name.
+      type(aircraft_view_t), intent(in) :: view
+         !! Aircraft to describe.
+      character(len=1) :: flag
+
+      flag = " "
+      if (view%held /= 0_int32 .or. view%hold_ordered /= 0_int32) flag = "H"
+   end function hold_flag
 
    pure function cursor_mark(id, selected) result(mark)
       !! The one-character gutter in front of a board row.
@@ -150,6 +167,7 @@ contains
 
       type(aircraft_view_t) :: aircraft(MAX_VIEWS)
       integer(default_int) :: n_aircraft, i, parked, departed, diverted, held_total
+      integer(default_int) :: diverted_on_orders
       integer(int64) :: total_taxi, total_delay, worst_delay, total_stand_wait, worst_stand_wait
 
       call query_aircraft(sim%world, aircraft, n_aircraft)
@@ -157,6 +175,7 @@ contains
       parked = 0_default_int
       departed = 0_default_int
       diverted = 0_default_int
+      diverted_on_orders = 0_default_int
       held_total = 0_default_int
       total_taxi = 0_int64
       total_delay = 0_int64
@@ -174,7 +193,15 @@ contains
             total_stand_wait = total_stand_wait + aircraft(i)%stand_wait_ms
             worst_stand_wait = max(worst_stand_wait, aircraft(i)%stand_wait_ms)
          end if
-         if (aircraft(i)%phase == PHASE_DIVERTED) diverted = diverted + 1_default_int
+         if (aircraft(i)%phase == PHASE_DIVERTED) then
+            diverted = diverted + 1_default_int
+            ! Still held at the moment the fuel ran out. A hold lifted in time
+            ! does not count, which is the one distinction this can draw
+            ! honestly without replaying the day.
+            if (aircraft(i)%hold_ordered /= 0_int32) then
+               diverted_on_orders = diverted_on_orders + 1_default_int
+            end if
+         end if
          held_total = held_total + int(aircraft(i)%holds, default_int)
          if (aircraft(i)%airborne_tick > 0_tick_k) then
             departed = departed + 1_default_int
@@ -192,6 +219,15 @@ contains
       ! Diversions are the hard failure. Delay minutes are a score you can
       ! argue about; an aircraft that went somewhere else is not.
       call logger%info("  DIVERTED          "//int_text(int(diverted, int64)))
+      ! A statement of fact, not of blame: this aircraft was still held on the
+      ! player's orders when its fuel ran out. It is deliberately not a
+      ! counterfactual. Holding an aircraft that was going to divert anyway
+      ! counts here too, because the simulation does not run the day twice to
+      ! find out, and a number that quietly guessed would be worse than one
+      ! that states what happened.
+      if (diverted_on_orders > 0_default_int) then
+         call logger%info("    held at bingo   "//int_text(int(diverted_on_orders, int64)))
+      end if
       call logger%info("  holding circuits  "//int_text(int(held_total, int64)))
       if (parked > 0_default_int) then
          call logger%info("  mean taxi-in      "//duration_text(total_taxi/int(parked, int64)))

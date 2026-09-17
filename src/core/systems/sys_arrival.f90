@@ -3,14 +3,21 @@
 !! The arrival manager: touchdown, landing roll, vacating the runway.
 module sys_arrival
    !! Sole writer of: `aircraft%phase` while an arrival is on the runway,
-   !! `aircraft%touchdown_tick`, `runway_free_at` and `runway_last_wake`.
+   !! `aircraft%touchdown_tick`, `aircraft%hold_ordered`, `runway_free_at` and
+   !! `runway_last_wake`.
+   !!
+   !! `hold_ordered` is the arrival's own field and not `held`, which belongs
+   !! to `sys_departure`. Two systems writing one field is the cross-system
+   !! write the layering rule forbids, and it would make what happens depend on
+   !! which of them the bus reached first.
    use core_kinds, only: tick_k, id_k, int32, int64, NO_ID
    use core_time, only: SECOND, MINUTE
    use core_command, only: command_t
    use core_event, only: event_t
    use core_event_kinds, only: K_TOUCHDOWN, K_ROLLOUTCOMPLETE, K_RUNWAYEXITED, &
                                K_APPROACHREQUESTED, K_HOLDENTERED, K_BINGOFUEL, &
-                               K_CMD_SEQUENCE_ARRIVAL
+                               K_CMD_SEQUENCE_ARRIVAL, K_CMD_HOLD_ARRIVAL, &
+                               K_CMD_RELEASE_ARRIVAL
    use core_rng, only: stream_t
    use core_scheduler, only: scheduler_t
    use core_system, only: system_t
@@ -119,6 +126,10 @@ contains
          call bingo_fuel(w, event)
       case (K_CMD_SEQUENCE_ARRIVAL)
          call commanded_sequence(w, event)
+      case (K_CMD_HOLD_ARRIVAL)
+         call commanded_hold(w, event, 1_int32)
+      case (K_CMD_RELEASE_ARRIVAL)
+         call commanded_hold(w, event, 0_int32)
       case (K_TOUCHDOWN)
          call on_touchdown(self, w, sched, event)
       case (K_ROLLOUTCOMPLETE)
@@ -230,6 +241,40 @@ contains
       w%aircraft%arr_sequence(aircraft) = int(command%b, int32)
    end subroutine commanded_sequence
 
+   subroutine commanded_hold(w, event, state)
+      !! The player has told an arrival to hold, or let it back in.
+      !!
+      !! A held arrival is simply never offered a clearance. It is not removed
+      !! from the stack and not exempted from anything: it keeps flying
+      !! circuits, keeps burning fuel, and diverts at bingo like anybody else.
+      !!
+      !! That it can end in a diversion is the point rather than a rough edge.
+      !! Holding is how a controller buys room, and the room is bought with
+      !! somebody's fuel. A hold that could not cost anything would be a free
+      !! action, and a free action is not a decision.
+      type(world_t), intent(inout) :: w
+      type(event_t), intent(in) :: event
+      integer(int32), intent(in) :: state
+         !! One to hold, zero to release.
+
+      type(command_t) :: command
+      integer(tick_k) :: issued_at
+      integer(id_k) :: aircraft
+
+      call w%commands%get(event%payload, issued_at, command)
+      aircraft = command%a
+      if (aircraft < 1_id_k .or. int(aircraft, default_int) > w%aircraft%size()) return
+
+      ! An aircraft that has landed or diverted is past being held. Refusing
+      ! quietly rather than setting a flag nothing will read keeps the field
+      ! meaning "this is being held right now", which is what the report reads
+      ! it as when it decides whose diversion was whose doing.
+      if (w%aircraft%phase(aircraft) /= PHASE_HOLDING .and. &
+          w%aircraft%phase(aircraft) /= PHASE_APPROACH) return
+
+      w%aircraft%hold_ordered(aircraft) = state
+   end subroutine commanded_hold
+
    pure function precedes(w, left, right) result(first)
       !! Whether `left` should be given a clearance before `right`.
       !!
@@ -304,7 +349,8 @@ contains
       !! Considered over everyone holding plus whoever is asking, so a
       !! clearance goes to the front of the sequence rather than to whichever
       !! aircraft's circuit came round first -- but only among those the
-      !! airport can actually accommodate. A Super at the front of the queue
+      !! airport can actually accommodate, and only among those the player has
+      !! not held. A Super at the front of the queue
       !! does not stop a Medium landing when the only free stand is a Medium
       !! one; it does mean the Super gets the Super stand the moment one frees.
       type(world_t), intent(in) :: w
@@ -315,11 +361,14 @@ contains
       integer(default_int) :: i
 
       best = NO_ID
-      if (can_be_taken(w, asking)) best = asking
+      if (can_be_taken(w, asking) .and. w%aircraft%hold_ordered(asking) == 0_int32) best = asking
 
       do i = 1_default_int, w%aircraft%size()
          if (int(i, id_k) == asking) cycle
          if (w%aircraft%phase(i) /= PHASE_HOLDING) cycle
+         ! Held on the player's orders: still in the stack, still burning, just
+         ! never asked.
+         if (w%aircraft%hold_ordered(i) /= 0_int32) cycle
          if (.not. can_be_taken(w, int(i, id_k))) cycle
          if (best == NO_ID) then
             best = int(i, id_k)

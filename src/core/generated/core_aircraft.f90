@@ -6,7 +6,7 @@
 !! Produced by `tools/autogen/core_aircraft.fypp`; edit the template and rerun
 !! `tools/autogen/autogen.sh` instead.
 module core_aircraft
-   !! 22 scalar field arrays and 1 matrix field(s), serialized and hashed together.
+   !! 23 scalar field arrays and 1 matrix field(s), serialized and hashed together.
    !!
    !! The schema string below is written into every stream and folded into
    !! every digest, so a checkpoint from a different field list fails loudly
@@ -16,7 +16,7 @@ module core_aircraft
    !! aircraft;phase:i32,wake:i32,gate:i32,node:i32,goal:i32,generation:i32,route_len:i32,route_pos:i32,pa
    !! x:i32,touchdown_tick:i64,on_blocks_tick:i64,delay_ms:i64,held:i32,ready_tick:i64,airborne_tick:i64,f
    !! uel_ms:i64,hold_since_tick:i64,holds:i32,exited_tick:i64,stand_wait_ms:i64,arr_sequence:i32,dep_sequ
-   !! ence:i32,route:i32x64
+   !! ence:i32,hold_ordered:i32,route:i32x64
    !! ```
    !!
    !! prefixed by `SOA_SCHEMA_PREFIX`, which carries pic's own record-layout
@@ -38,7 +38,7 @@ module core_aircraft
    character(len=*), parameter :: AIRCRAFT_SCHEMA = SOA_SCHEMA_PREFIX//"aircraft;phase:i32,wake:i32,gate:i32,node:i32,goal:i32,gene&
        &ration:i32,route_len:i32,route_pos:i32,pax:i32,touchdown_tick:i64,on_blocks_tick:i64,delay_ms:i64,held:i32,ready_tick:i64,a&
        &irborne_tick:i64,fuel_ms:i64,hold_since_tick:i64,holds:i32,exited_tick:i64,stand_wait_ms:i64,arr_sequence:i32,dep_sequence:&
-       &i32,route:i32x64"
+       &i32,hold_ordered:i32,route:i32x64"
       !! Layout identity. Any change to the field list changes it, which
       !! retires every older checkpoint through the ordinary mismatch path.
 
@@ -92,6 +92,8 @@ module core_aircraft
          !! Player-set place in the landing order; zero is unsequenced.
       integer(int32), allocatable :: dep_sequence(:)
          !! Player-set place in the takeoff queue; zero is unsequenced.
+      integer(int32), allocatable :: hold_ordered(:)
+         !! Non-zero while the player is holding this arrival out of the landing order.
       integer(int32), allocatable :: route(:, :)
          !! Planned taxi route, one column per aircraft. Shape (AIRCRAFT_ROUTE_ROWS, capacity).
       integer(default_int) :: n = 0_default_int
@@ -154,6 +156,7 @@ contains
          this%stand_wait_ms(cap), &
          this%arr_sequence(cap), &
          this%dep_sequence(cap), &
+         this%hold_ordered(cap), &
          this%route(AIRCRAFT_ROUTE_ROWS, cap), &
          stat=status)
       if (status /= 0) then
@@ -183,6 +186,7 @@ contains
       this%stand_wait_ms = 0_int64
       this%arr_sequence = 0_int32
       this%dep_sequence = 0_int32
+      this%hold_ordered = 0_int32
       this%route = NO_ID
       this%n = 0_default_int
       this%cap = cap
@@ -357,6 +361,11 @@ contains
          if (present(err)) err = fault
          return
       end if
+      call soa_write_field(stream, this%hold_ordered, this%n, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
 
       ! A matrix goes out as one flat record of ROWS*n elements, in Fortran
       ! column-major order, so reading it back is a reshape and not a guess.
@@ -411,6 +420,7 @@ contains
       integer(int64), allocatable :: buffer_stand_wait_ms(:)
       integer(int32), allocatable :: buffer_arr_sequence(:)
       integer(int32), allocatable :: buffer_dep_sequence(:)
+      integer(int32), allocatable :: buffer_hold_ordered(:)
       integer(int32), allocatable :: buffer_route(:)
 
       stream = int(unit, default_int)
@@ -536,6 +546,11 @@ contains
          if (present(err)) err = fault
          return
       end if
+      call soa_read_field(stream, "hold_ordered", buffer_hold_ordered, n, swapped, fault)
+      if (fault%has_error()) then
+         if (present(err)) err = fault
+         return
+      end if
 
       call soa_read_field(stream, "route", buffer_route, &
                           AIRCRAFT_ROUTE_ROWS*n, swapped, fault)
@@ -568,6 +583,7 @@ contains
       this%stand_wait_ms(1:n) = buffer_stand_wait_ms
       this%arr_sequence(1:n) = buffer_arr_sequence
       this%dep_sequence(1:n) = buffer_dep_sequence
+      this%hold_ordered(1:n) = buffer_hold_ordered
       this%route(:, 1:n) = reshape(buffer_route, [AIRCRAFT_ROUTE_ROWS, n])
       this%n = n
    end subroutine aircraft_deserialize
@@ -610,6 +626,7 @@ contains
       call soa_hash_field(hasher, this%stand_wait_ms, this%n)
       call soa_hash_field(hasher, this%arr_sequence, this%n)
       call soa_hash_field(hasher, this%dep_sequence, this%n)
+      call soa_hash_field(hasher, this%hold_ordered, this%n)
       flat = reshape(this%route(:, 1:this%n), [AIRCRAFT_ROUTE_ROWS*this%n])
       call soa_hash_field(hasher, flat, AIRCRAFT_ROUTE_ROWS*this%n)
       digest = hasher%digest()
@@ -641,6 +658,7 @@ contains
       if (allocated(this%stand_wait_ms)) deallocate (this%stand_wait_ms)
       if (allocated(this%arr_sequence)) deallocate (this%arr_sequence)
       if (allocated(this%dep_sequence)) deallocate (this%dep_sequence)
+      if (allocated(this%hold_ordered)) deallocate (this%hold_ordered)
       if (allocated(this%route)) deallocate (this%route)
       this%n = 0_default_int
       this%cap = 0_default_int

@@ -89,13 +89,17 @@ module core_event_kinds
       !! Player command: Set the declared arrival rate, per hour.
    integer(int16), parameter, public :: K_CMD_SET_VISIBILITY = 68_int16
       !! Player command: Report a new visibility, in metres.
+   integer(int16), parameter, public :: K_CMD_HOLD_ARRIVAL = 69_int16
+      !! Player command: Keep an arrival in the holding stack.
+   integer(int16), parameter, public :: K_CMD_RELEASE_ARRIVAL = 70_int16
+      !! Player command: Let a held arrival be offered a clearance.
 
-   integer, parameter :: MAX_EVENT_KIND = 68
+   integer, parameter :: MAX_EVENT_KIND = 70
       !! Largest identifier in use, and therefore the upper bound of the bus
       !! dispatch table. Default integer kind on purpose: it is an array bound,
       !! not simulation state. Recomputed by fypp whenever the list grows.
 
-   integer, parameter :: N_EVENT_KINDS = 35
+   integer, parameter :: N_EVENT_KINDS = 37
       !! How many kinds are declared, which is not `MAX_EVENT_KIND` because the
       !! numbering leaves gaps between sections.
 
@@ -182,6 +186,10 @@ contains
          name = "CmdSetArrivalRate"
       case (68_int16)
          name = "CmdSetVisibility"
+      case (69_int16)
+         name = "CmdHoldArrival"
+      case (70_int16)
+         name = "CmdReleaseArrival"
       case default
          name = "Unknown"
       end select

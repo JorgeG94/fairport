@@ -128,6 +128,21 @@ if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel|IntelLLVM")
   set(fairport_flags "-stand" "f18" "-traceback")
   set(fairport_warnings "-warn" "all")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "LFortran")
+  # Automatic reallocation on assignment is standard since Fortran 2003 and
+  # LFortran does not do it unless asked. Without this, `tokens = tokenize(..)`
+  # and every `testsuite = [ ... ]` fail at run time with "array is not
+  # allocated" rather than at compile time, so the flag is not a nicety.
+  #
+  # LFortran is not usable for fairport at 0.66.0 even with it. Anything that
+  # builds a `sim_t` corrupts the heap -- `double free or corruption (fasttop)`
+  # in every suite that runs a simulation, and a batch run reports no aircraft
+  # ever parking while three of the four still depart. The bus holds
+  # `class(system_t)` pointers into components of a `target` simulation, which
+  # is legal and which gfortran and ifx both get right. This flag is here so the
+  # next attempt starts from the real problem instead of this one.
+  set(fairport_flags "--realloc-lhs-arrays")
+  set(fairport_warnings)
 else()
   set(fairport_flags)
   set(fairport_warnings)

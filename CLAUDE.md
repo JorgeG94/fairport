@@ -164,8 +164,7 @@ what it acts on is exactly what was written down.
 Done:
 
 - **Commands and the command log**, so `(seed, command log)` is complete rather
-  than half-built. `assign_gate` works end to end; the other seven commands are
-  declared and unhandled until their systems exist.
+  than half-built. All eleven are handled; `assign_gate` was the first.
 - **The TOML schedule loader**, via toml-f pinned at v0.5.2. `[[arrival]]` pins
   an exact movement; `[[bank]]` states volume and shape and the loader draws
   the movements from the schedule's own RNG stream. Pinned movements load
@@ -185,6 +184,9 @@ Done:
 - **Sequencing.** `sequence_arrival` and `sequence_departure` reorder the
   landing stack and the takeoff queue. With holding scarce, this is how the
   player chooses *who* diverts.
+
+- **`hold_arrival` / `release_arrival`**, the arrival half of a pair that was
+  asymmetric for a milestone. `scenarios/held_too_long.txt` is what they cost.
 
 - **The schedule at the design's scale.** Forty arrivals, which is eighty
   movements once each leaves again.
@@ -316,6 +318,42 @@ across a day is a trickle six stands absorb without complaint, and nothing
 interesting happens -- zero diversions. Concentrated into two banks it is a
 wave, and four aircraft run out of holding fuel. The bank windows are the
 tuning knob for how hard the day is, not the movement count.
+
+### Holding an arrival has to be able to kill it
+
+`hold_arrival` takes an aircraft out of the landing order and nothing else. It
+stays in the stack, keeps flying circuits, keeps burning fuel, and diverts at
+bingo like anybody else. A hold that could not cost anything would be a free
+action, and a free action is not a decision -- the player would hold everything
+and sort it out later.
+
+`hold_ordered` is the arrival's own field, not `held`, which is
+`sys_departure`'s. Two systems writing one field is the cross-system write the
+layering rule forbids, and which one won would depend on bus order.
+
+The command is refused for an aircraft that has already landed or diverted, so
+the field keeps meaning "this is being held right now" -- which is what the
+report reads when it decides whose diversion happened under a hold.
+
+### "Held at bingo" is a fact, not a verdict
+
+The report names diversions that happened while the aircraft was still held,
+and deliberately does not claim the hold caused them. Holding `MOR014` on
+`full_day` counts there although it was going to divert regardless: the
+simulation does not run the day twice to find out, and a number that quietly
+guessed would be worse than one that states what happened.
+
+Holding an aircraft that was *not* going to divert reads unambiguously.
+`hold_arrival 22` takes `full_day` from five losses to six, and the sixth is
+the aircraft that was held -- a pure loss, because the stack was already longer
+than the runway and the slot it gave up went to somebody who would have got one
+anyway.
+
+`hold_arrival 17` is the more interesting one and still loses five: `MOR013`
+dies and `MOR014` lives. `MOR013` is the Super. That is the same trade
+`costly_favour.txt` makes from the other direction -- there the player promotes
+an aircraft and costs the Super its slot; here they hold the Super and cost it
+directly. Two commands, opposite in shape, identical in outcome.
 
 ### A controller grants the slot; aircraft only ask
 

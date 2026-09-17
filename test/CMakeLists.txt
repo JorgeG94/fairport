@@ -81,6 +81,15 @@ add_test(
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 add_test(
+  NAME "fairport/roundtrip_held_too_long"
+  COMMAND
+    ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
+    -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/held_too_long.txt
+    -DSAVE=${CMAKE_CURRENT_BINARY_DIR}/roundtrip_held.txt -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/roundtrip.cmake
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+add_test(
   NAME "fairport/roundtrip_clear_day"
   COMMAND
     ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
@@ -134,6 +143,19 @@ add_test(
     -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/stand_squeeze.txt
     -DGOLDEN=${CMAKE_SOURCE_DIR}/test/golden/stand_squeeze_seed42.txt
     -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/golden_actual_squeeze.txt -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/golden.cmake
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# The new command's own golden. `hold_arrival` is the only one of the nine that
+# can lose an aircraft outright, so the report line that names it -- "held at
+# bingo" -- is worth pinning rather than trusting.
+add_test(
+  NAME "fairport/golden_held_too_long"
+  COMMAND
+    ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
+    -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/held_too_long.txt
+    -DGOLDEN=${CMAKE_SOURCE_DIR}/test/golden/held_too_long_seed42.txt
+    -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/golden_actual_held.txt -P
     ${CMAKE_CURRENT_SOURCE_DIR}/golden.cmake
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 

@@ -34,6 +34,8 @@
   ('close_runway',        65, 1, 'Take a runway out of use.'),                        &
   ('open_runway',         66, 1, 'Return a runway to use.'),                          &
   ('set_arrival_rate',    67, 1, 'Set the declared arrival rate, per hour.'),         &
-  ('set_visibility',      68, 1, 'Report a new visibility, in metres.')               ]
+  ('set_visibility',      68, 1, 'Report a new visibility, in metres.'),              &
+  ('hold_arrival',        69, 1, 'Keep an arrival in the holding stack.'),           &
+  ('release_arrival',     70, 1, 'Let a held arrival be offered a clearance.')       ]
 #:set COMMAND_ID_MIN = 60
 #:set COMMAND_ID_MAX = 79

@@ -243,8 +243,14 @@ contains
       !! old checkpoints anyway.
       type(error_type), allocatable, intent(out) :: error
 
-      integer(int64), parameter :: EXPECTED_BYTES = 1415_int64
+      integer(int64), parameter :: EXPECTED_BYTES = 1452_int64
          !! Length of a stream holding exactly two aircraft.
+         !!
+         !! Changes only when the field list does, which retires old
+         !! checkpoints anyway. It was 1415 before `hold_ordered`, and one
+         !! `int32` field costs more than its eight bytes of data: the stream
+         !! names every field it carries, which is what lets a reader check it
+         !! is reading what it thinks it is.
 
       type(aircraft_soa_t) :: container
       type(error_t) :: err

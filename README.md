@@ -67,16 +67,21 @@ Space pauses, `+` and `-` change speed, `q` quits. The clock starts five
 minutes before the first movement rather than at midnight.
 
 The arrow keys move a cursor down the strip. With an aircraft selected, `h`
-holds a departure on its stand, `r` releases it, and `f` puts it at the front
-of whichever queue it is in -- the landing order if it is in the air, the
-departure queue if it is on the ground. `:` opens a command line that takes any
-of the nine commands in the same words a scenario file uses, so there is
-nothing to learn twice:
+holds it, `r` releases it, and `f` puts it at the front of the queue. Each of
+those reads the aircraft's phase and picks the arrival or the departure form,
+so one key means the obvious thing wherever the aircraft is -- but they do not
+cost the same. Holding a departure keeps it on its stand and costs delay.
+Holding an arrival keeps it in the stack, where it burns fuel and can run out:
+an aircraft held long enough diverts, and the report says so.
+
+`:` opens a command line that takes any of the eleven commands in the same
+words a scenario file uses, so there is nothing to learn twice:
 
 ```
 :set_visibility 800
 :close_runway 1
 :sequence_arrival 19 1
+:hold_arrival 22
 ```
 
 Every one of those goes through `sim%submit` and lands in the command log.

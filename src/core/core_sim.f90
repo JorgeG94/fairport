@@ -23,7 +23,8 @@ module core_sim
                                K_WEATHERCHANGED, K_CMD_SET_VISIBILITY, K_CMD_SET_ARRIVAL_RATE, &
                                K_CMD_CLOSE_RUNWAY, K_CMD_OPEN_RUNWAY, &
                                K_APPROACHREQUESTED, K_BINGOFUEL, &
-                               K_CMD_SEQUENCE_ARRIVAL, K_CMD_SEQUENCE_DEPARTURE
+                               K_CMD_SEQUENCE_ARRIVAL, K_CMD_SEQUENCE_DEPARTURE, &
+                               K_CMD_HOLD_ARRIVAL, K_CMD_RELEASE_ARRIVAL
    use core_graph, only: NODE_INTERSECTION, NODE_GATE, NODE_HOLD_SHORT, &
                          NODE_RUNWAY_THRESHOLD, NODE_RUNWAY_EXIT, NODE_DEICE_PAD, &
                          node_kind_name
@@ -132,6 +133,8 @@ contains
       call this%bus%subscribe(K_APPROACHREQUESTED, this%arrival, err)
       call this%bus%subscribe(K_BINGOFUEL, this%arrival, err)
       call this%bus%subscribe(K_CMD_SEQUENCE_ARRIVAL, this%arrival, err)
+      call this%bus%subscribe(K_CMD_HOLD_ARRIVAL, this%arrival, err)
+      call this%bus%subscribe(K_CMD_RELEASE_ARRIVAL, this%arrival, err)
       call this%bus%subscribe(K_TOUCHDOWN, this%arrival, err)
       call this%bus%subscribe(K_ROLLOUTCOMPLETE, this%arrival, err)
 

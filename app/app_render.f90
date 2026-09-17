@@ -20,16 +20,54 @@ module app_render
 
    public :: render_board
    public :: render_stats
+   public :: board_lines
+   public :: MAX_VIEWS, BOARD_WIDTH
 
    integer(default_int), parameter :: MAX_VIEWS = 256_default_int
       !! Rows the board will draw. Beyond this the board is the wrong tool.
 
+   integer, parameter :: BOARD_WIDTH = 200
+      !! Row width of the board buffer. Wide enough that a gate line for a
+      !! large airport is not cut, and the interactive frame truncates to the
+      !! real terminal width afterwards.
+
 contains
 
    subroutine render_board(sim)
-      !! Draw one ops board frame.
+      !! Draw one ops board frame through the logger.
+      !!
+      !! Batch mode's view. The interactive terminal cannot use this -- writing
+      !! through the logger in the middle of a frame is how a TUI ends up with
+      !! its own log lines scrolled through it -- so both go through
+      !! `board_lines` and differ only in where the lines end up.
       type(sim_t), intent(in) :: sim
          !! Simulation to draw.
+
+      character(len=BOARD_WIDTH) :: lines(MAX_VIEWS + 8_default_int)
+      integer(default_int) :: n_lines, i
+
+      call board_lines(sim, lines, n_lines)
+      do i = 1_default_int, n_lines
+         call logger%info(trim(lines(i)))
+      end do
+   end subroutine render_board
+
+   subroutine board_lines(sim, lines, n_lines, selected)
+      !! Fill `lines` with the ops board, one row per element.
+      !!
+      !! Caller-owned buffer and no I/O of any kind, so the same board serves
+      !! the batch log and the interactive frame.
+      type(sim_t), intent(in) :: sim
+         !! Simulation to draw.
+      character(len=*), intent(out) :: lines(:)
+         !! Buffer to fill.
+      integer(default_int), intent(out) :: n_lines
+         !! Rows written.
+      integer(id_k), intent(in), optional :: selected
+         !! Aircraft the interactive board's cursor is on. Marked with an
+         !! arrow rather than reverse video, so the board reads the same in a
+         !! terminal that drops attributes and in a golden file. Absent in
+         !! batch mode, where there is no cursor.
 
       type(aircraft_view_t) :: aircraft(MAX_VIEWS)
       type(gate_view_t) :: gates(MAX_VIEWS)
@@ -39,16 +77,19 @@ contains
       call query_aircraft(sim%world, aircraft, n_aircraft)
       call query_gates(sim%world, gates, n_gates)
 
-      call logger%info("")
-      call logger%info(" FAIRPORT            "//clock_text(sim%world%now)// &
-                       "     VIS "//int_text(int(sim%world%visibility_m, int64))//"m"// &
-                       "   ARR "//int_text(int(sim%world%arr_rate_per_hour, int64))//"/hr"// &
-                       "   DEP "//int_text(int(sim%world%dep_rate_per_hour, int64))//"/hr")
-      call logger%info("")
-      call logger%info(" #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY")
+      n_lines = 0_default_int
+      call emit(lines, n_lines, "")
+      call emit(lines, n_lines, " FAIRPORT            "//clock_text(sim%world%now)// &
+                "     VIS "//int_text(int(sim%world%visibility_m, int64))//"m"// &
+                "   ARR "//int_text(int(sim%world%arr_rate_per_hour, int64))//"/hr"// &
+                "   DEP "//int_text(int(sim%world%dep_rate_per_hour, int64))//"/hr")
+      call emit(lines, n_lines, "")
+      call emit(lines, n_lines, &
+                " #  CALL      TYPE  PHASE       GATE  TD        ONBLK     OFF       DLY")
 
       do i = 1_default_int, n_aircraft
-         row = " "//pad_left(int_text(int(i, int64)), 2_default_int)// &
+         row = cursor_mark(aircraft(i)%id, selected)// &
+               pad_left(int_text(int(i, int64)), 2_default_int)// &
                "  "//pad_right(trim(aircraft(i)%callsign), 8_default_int)// &
                "  "//wake_letter(aircraft(i)%wake)// &
                "     "//pad_right(phase_name(aircraft(i)%phase), 10_default_int)// &
@@ -57,17 +98,46 @@ contains
                "  "//on_blocks_text(aircraft(i))// &
                "  "//clock_or_dashes(aircraft(i)%airborne_tick)// &
                "  "//pad_left(delay_text(aircraft(i)), 6_default_int)
-         call logger%info(row)
+         if (n_lines >= int(size(lines), default_int) - 3_default_int) exit
+         call emit(lines, n_lines, row)
       end do
 
-      call logger%info("")
+      call emit(lines, n_lines, "")
       row = " GATES "
       do i = 1_default_int, n_gates
          row = row//" "//trim(gates(i)%name)//"["//occupant_text(aircraft, n_aircraft, gates(i)%occupant)//"]"
       end do
-      call logger%info(row)
-      call logger%info("")
-   end subroutine render_board
+      call emit(lines, n_lines, row)
+      call emit(lines, n_lines, "")
+   end subroutine board_lines
+
+   pure function cursor_mark(id, selected) result(mark)
+      !! The one-character gutter in front of a board row.
+      integer(id_k), intent(in) :: id
+         !! Aircraft on this row.
+      integer(id_k), intent(in), optional :: selected
+         !! Aircraft under the cursor, if there is a cursor.
+      character(len=1) :: mark
+
+      mark = " "
+      if (present(selected)) then
+         if (id == selected .and. id /= NO_ID) mark = ">"
+      end if
+   end function cursor_mark
+
+   pure subroutine emit(lines, n_lines, text)
+      !! Append one row, silently dropping anything past the buffer.
+      character(len=*), intent(inout) :: lines(:)
+         !! Buffer being filled.
+      integer(default_int), intent(inout) :: n_lines
+         !! Rows written so far.
+      character(len=*), intent(in) :: text
+         !! Row to append; truncated to the buffer's row width.
+
+      if (n_lines >= int(size(lines), default_int)) return
+      n_lines = n_lines + 1_default_int
+      lines(n_lines) = text
+   end subroutine emit
 
    subroutine render_stats(sim)
       !! Print the batch report.

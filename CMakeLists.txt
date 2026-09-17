@@ -1,8 +1,28 @@
 cmake_minimum_required(VERSION 3.28)
 
+# The interactive terminal is opt-in.
+#
+# It is the only part of fairport that compiles C -- pic's terminal layer is a
+# single C file holding every operating-system conditional in either project --
+# so a build that does not want it does not build it, and the test suite, batch
+# mode and the determinism digest are all unaffected either way.
+#
+# It does not save you needing a C compiler: pic declares `LANGUAGES Fortran C`
+# unconditionally, so consuming pic at all requires one. What this option
+# controls is whether pic's `term/` directory is compiled and whether
+# `app_tui.f90` exists in this build.
+option(FAIRPORT_ENABLE_TUI
+       "Build the interactive terminal; requires a C compiler" OFF)
+
+if(FAIRPORT_ENABLE_TUI)
+  set(fairport_languages Fortran C)
+else()
+  set(fairport_languages Fortran)
+endif()
+
 project(
   "fairport"
-  LANGUAGES Fortran
+  LANGUAGES ${fairport_languages}
   VERSION 0.1.0
   DESCRIPTION "Deterministic airport operations simulator")
 set(project_name fairport)
@@ -29,8 +49,8 @@ set(FAIRPORT_PIC_REPOSITORY
     "https://github.com/JorgeG94/pic.git"
     CACHE STRING "Git repository to fetch pic from")
 set(FAIRPORT_PIC_TAG
-    "6543759b"
-    CACHE STRING "pic commit to pin; v0.8.1")
+    "82785ccf"
+    CACHE STRING "pic commit to pin; v0.8.2")
 
 include(FetchContent)
 
@@ -38,6 +58,13 @@ include(FetchContent)
 # test-drive fetch out of a fairport build.
 set(PIC_ENABLE_TESTING
     OFF
+    CACHE BOOL "" FORCE)
+
+# pic's terminal layer follows fairport's own switch. It is pic's only C source
+# and its only place with operating-system conditionals, so a build that does
+# not want the interactive terminal does not pay for either.
+set(PIC_ENABLE_TERM
+    ${FAIRPORT_ENABLE_TUI}
     CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
@@ -64,9 +91,22 @@ FetchContent_Declare(
   GIT_TAG "${FAIRPORT_TOMLF_TAG}")
 FetchContent_MakeAvailable(toml-f)
 
-# pic writes its .mod files to ${CMAKE_BINARY_DIR}/modules, and fairport joins
-# it there so that one include directory covers both.
+# Where the .mod files live.
+#
+# fairport keeps its own in the top-level build. pic keeps its own in *its*
+# build directory, which FetchContent hands back as `pic_BINARY_DIR`.
+#
+# Those used to be the same place: pic wrote to ${CMAKE_BINARY_DIR}/modules, the
+# top-level build, and fairport simply joined it there. pic v0.8.2 moved to
+# ${PROJECT_BINARY_DIR}/modules, which is correct -- a dependency writing into
+# its parent's build tree is rude and collides the moment two of them do it --
+# and it broke every consumer that had been relying on the old spelling,
+# including this one.
+#
+# Asking FetchContent where pic ended up is the right question either way, and
+# does not care which spelling pic uses next.
 set(fairport_module_dir "${CMAKE_BINARY_DIR}/modules")
+set(pic_module_dir "${pic_BINARY_DIR}/modules")
 
 if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
   set(fairport_flags "-std=f2018" "-ffree-line-length-none" "-fbacktrace")
@@ -100,7 +140,8 @@ add_subdirectory(src/core)
 
 set_target_properties(fairport_core PROPERTIES Fortran_MODULE_DIRECTORY
                                                "${fairport_module_dir}")
-target_include_directories(fairport_core PUBLIC "${fairport_module_dir}")
+target_include_directories(fairport_core PUBLIC "${fairport_module_dir}"
+                                                "${pic_module_dir}")
 target_compile_options(fairport_core PRIVATE ${fairport_flags}
                                              ${fairport_warnings})
 target_link_libraries(fairport_core PUBLIC pic::pic_core)
@@ -124,5 +165,6 @@ message(STATUS "========== fairport configuration ==========")
 message(STATUS "  Fortran compiler   : ${CMAKE_Fortran_COMPILER_ID}")
 message(STATUS "  Build type         : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Testing            : ${FAIRPORT_ENABLE_TESTING}")
+message(STATUS "  Interactive TUI    : ${FAIRPORT_ENABLE_TUI}")
 message(STATUS "============================================")
 message(STATUS "")

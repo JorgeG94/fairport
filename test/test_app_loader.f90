@@ -8,7 +8,7 @@ module test_app_loader
    !! someone will eventually type.
    use testdrive, only: new_unittest, unittest_type, error_type, check
    use app_airport, only: load_airport
-   use app_scenario, only: run_scenario
+   use app_scenario, only: run_scenario, save_session, session_t
    use core_sim, only: sim_t, id_k, tick_k, HOUR, MINUTE, &
                        WAKE_MEDIUM, WAKE_HEAVY, WAKE_SUPER, PHASE_AT_GATE
    use pic_error, only: error_t
@@ -20,6 +20,7 @@ module test_app_loader
 
    character(len=*), parameter :: AIRPORT_PATH = "test_loader_airport.txt"
    character(len=*), parameter :: SCENARIO_PATH = "test_loader_scenario.txt"
+   character(len=*), parameter :: SAVE_PATH = "test_loader_save.txt"
 
 contains
 
@@ -42,7 +43,10 @@ contains
                   new_unittest("scenario_rejects_a_bad_clock", test_bad_clock), &
                   new_unittest("scenario_rejects_an_unknown_runway", test_bad_runway), &
                   new_unittest("scenario_rejects_an_unstandable_aircraft", test_no_stand), &
-                  new_unittest("command_line_seed_beats_the_script", test_seed_override) &
+                  new_unittest("command_line_seed_beats_the_script", test_seed_override), &
+                  new_unittest("scenario_clock_accepts_milliseconds", test_clock_millis), &
+                  new_unittest("scenario_rejects_a_short_millisecond_field", test_short_millis), &
+                  new_unittest("a_saved_session_replays_to_the_same_digest", test_save_replays) &
                   ]
    end subroutine collect_app_loader_tests
 
@@ -75,6 +79,148 @@ contains
       open (newunit=unit, file=path, status="old", action="read")
       close (unit, status="delete")
    end subroutine discard
+
+   subroutine test_clock_millis(error)
+      !! `HH:MM:SS.mmm` parses, and the milliseconds survive.
+      !!
+      !! The format exists because a command issued from the interactive board
+      !! lands on whatever tick the frame was at, and a save that rounded it to
+      !! the nearest second would replay as a different day.
+      type(error_type), allocatable, intent(out) :: error
+
+      type(sim_t), target :: sim
+      type(error_t) :: err
+
+      call write_good_airport()
+      call write_file(SCENARIO_PATH, [character(len=80) :: &
+                                      "seed 1", &
+                                      "load airport "//AIRPORT_PATH, &
+                                      "arrival TEST01 M 100 at 06:30:15.250 runway 1", &
+                                      "run until 09:00"])
+
+      call run_scenario(sim, SCENARIO_PATH, 0_int64, .false., .false., err)
+      call check(error,.not. err%has_error(), "HH:MM:SS.mmm was rejected")
+      if (allocated(error)) return
+      call check(error, sim%world%aircraft%touchdown_tick(1) == &
+                 6_tick_k*HOUR + 30_tick_k*MINUTE + 15250_tick_k, "milliseconds were dropped")
+
+      call discard(SCENARIO_PATH)
+      call discard(AIRPORT_PATH)
+      call sim%destroy()
+   end subroutine test_clock_millis
+
+   subroutine test_short_millis(error)
+      !! Two digits after the point is rejected rather than guessed at.
+      !!
+      !! `.25` is a quarter of a second to a reader and twenty-five
+      !! milliseconds to a parser that just reads an integer. Refusing it is
+      !! the only reading that cannot be silently wrong.
+      type(error_type), allocatable, intent(out) :: error
+
+      type(sim_t), target :: sim
+      type(error_t) :: err
+
+      call write_good_airport()
+      call write_file(SCENARIO_PATH, [character(len=80) :: &
+                                      "seed 1", &
+                                      "load airport "//AIRPORT_PATH, &
+                                      "arrival TEST01 M 100 at 06:30:15.25 runway 1", &
+                                      "run until 09:00"])
+
+      call run_scenario(sim, SCENARIO_PATH, 0_int64, .false., .false., err)
+      call check(error, err%has_error(), "'.25' was accepted as a millisecond field")
+
+      call discard(SCENARIO_PATH)
+      call discard(AIRPORT_PATH)
+      call sim%destroy()
+   end subroutine test_short_millis
+
+   subroutine test_save_replays(error)
+      !! A saved session is the same day when it is read back.
+      !!
+      !! The ctest version covers the committed scenarios; this one covers what
+      !! they cannot, which is a command on a tick that is not a whole second.
+      !! Every scripted command in `scenarios/` sits at `.000`, so the
+      !! millisecond field of the save format would round-trip vacuously there
+      !! while being wrong for every session played on the board.
+      type(error_type), allocatable, intent(out) :: error
+
+      type(sim_t), target :: original, replayed
+      type(session_t) :: session
+      type(error_t) :: err
+      character(len=:), allocatable :: digest
+
+      call write_good_airport()
+      call write_file(SCENARIO_PATH, [character(len=80) :: &
+                                      "seed 7", &
+                                      "max_aircraft 4", &
+                                      "load airport "//AIRPORT_PATH, &
+                                      "arrival TEST01 M 100 at 06:00 runway 1", &
+                                      "at 06:30:12.345 sequence_arrival 1 1", &
+                                      "run until 09:00"])
+
+      call run_scenario(original, SCENARIO_PATH, 0_int64, .false., .false., err, session)
+      call check(error,.not. err%has_error(), "the scenario reported an error")
+      if (allocated(error)) return
+
+      ! Not a vacuous comparison: the day has to have happened and the command
+      ! has to have been logged, or two empty runs would agree perfectly.
+      call check(error, original%world%aircraft%on_blocks_tick(1) > 0_tick_k, &
+                 "nothing happened in the run being saved")
+      if (allocated(error)) return
+      call check(error, original%world%commands%size() == 1_default_int, &
+                 "the command was not logged")
+      if (allocated(error)) return
+
+      call save_session(original, session, SAVE_PATH, err)
+      call check(error,.not. err%has_error(), "the session could not be saved")
+      if (allocated(error)) return
+      call check(error, file_contains(SAVE_PATH, "at 06:30:12.345 sequence_arrival"), &
+                 "the saved command lost its milliseconds")
+      if (allocated(error)) return
+
+      call run_scenario(replayed, SAVE_PATH, 0_int64, .false., .false., err)
+      call check(error,.not. err%has_error(), "the saved session would not parse")
+      if (allocated(error)) return
+
+      digest = original%log%digest_hex()
+      call check(error, digest == replayed%log%digest_hex(), &
+                 "the save replayed as a different day")
+      if (allocated(error)) return
+      call check(error, original%world%commands%size() == replayed%world%commands%size(), &
+                 "the replay issued a different number of commands")
+
+      call discard(SAVE_PATH)
+      call discard(SCENARIO_PATH)
+      call discard(AIRPORT_PATH)
+      call original%destroy()
+      call replayed%destroy()
+   end subroutine test_save_replays
+
+   function file_contains(path, needle) result(found)
+      !! Whether any line of a file contains a string.
+      character(len=*), intent(in) :: path
+         !! File to search.
+      character(len=*), intent(in) :: needle
+         !! Text to look for.
+      logical :: found
+
+      character(len=256) :: line
+      integer :: unit, status
+
+      found = .false.
+      open (newunit=unit, file=path, status="old", action="read", iostat=status)
+      if (status /= 0) return
+      do
+         read (unit, "(a)", iostat=status) line
+         if (status /= 0) exit
+         if (index(line, needle) > 0) then
+            found = .true.
+            exit
+         end if
+      end do
+      close (unit)
+   end function file_contains
 
    subroutine write_good_airport()
       !! Three nodes, one stand, one runway. The smallest workable airport.

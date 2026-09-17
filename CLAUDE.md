@@ -117,9 +117,10 @@ to the `tests` list in `test/CMakeLists.txt`, and add the `use` and
 Run one suite with `./build/fairport-tester core_graph`, one test with
 `./build/fairport-tester core_graph shortest_path_direct`.
 
-Nine unit suites plus four end-to-end checks run under ctest: the scenario
-runs, the digest repeats, the layering rules hold, the generated sources are
-current, and the whole console output matches `test/golden/`.
+Nine unit suites plus the end-to-end checks run under ctest: the scenario runs,
+the digest repeats, a saved session replays to the same digest and the same
+report, the layering rules hold, the generated sources are current, and the
+whole console output matches `test/golden/`.
 
 The determinism tests are the ones that matter. Local checks cover "same seed,
 same digest", "a different seed changes something", and agreement across
@@ -193,7 +194,91 @@ Done:
   allocation after load, no generic container, and the iteration order over a
   node is a function of insertion order alone.
 
-**That completes milestone 1 except the interactive terminal.**
+- **The interactive terminal** (`app_tui`), behind `-DFAIRPORT_ENABLE_TUI=ON`.
+  A 2 Hz ops board on `pic_ansi`'s `frame_t`, driven by `pic_term`. The arrow
+  keys move a cursor, `h`/`r`/`f` are shortcuts against the selected aircraft,
+  and `:` takes any command in scenario syntax.
+
+- **`--save`**, which writes a played session back out as a scenario file.
+
+**That completes milestone 1.**
+
+### A played session is a file, or it did not happen
+
+`--save` writes `seed`, the world-describing directives verbatim, the command
+log, and the horizon. That is a complete scenario, read back by the same parser
+a hand-written one is, so there is no save-specific code path to drift. It is
+what turns a day on the interactive board into something that can be handed to
+somebody -- otherwise a session happens, produces a digest, and leaves nothing.
+
+Three directives are not copied into the save. `seed` is written from
+`sim%seed`, which is what actually ran after any `--seed` override. `run`
+becomes the horizon. `at` is not copied because the command log already holds
+it, at the tick it really happened rather than the tick the file asked for --
+copying both would replay every scripted command twice.
+
+`log_write_to` claimed all of this in its docstring for a whole milestone and
+none of it was true: it wrote raw milliseconds, `parse_clock` only accepted
+`HH:MM`, and the routine had no callers at all. A documented round trip with no
+test is a comment.
+
+### Saved times carry milliseconds, and the third digit is required
+
+`HH:MM:SS.mmm`. A command issued from the board lands on whatever tick the
+frame was at, and rounding it to the nearest second moves it relative to the
+events around it: a 345 ms shift changes the digest of `costly_favour`. Every
+scripted command in `scenarios/` sits at `.000`, so the ctest round trip would
+pass vacuously on this point -- `a_saved_session_replays_to_the_same_digest`
+exists to put a command on a tick that is not a whole second.
+
+`.25` is rejected rather than read. It is a quarter of a second to a reader and
+twenty-five milliseconds to a parser that reads an integer, and refusing it is
+the only reading that cannot be silently wrong.
+
+`tick_split` wraps at midnight, which is right for a clock face and wrong for a
+save: a horizon of `24:00` would be written `00:00` and replay as an empty run.
+The save format does its own arithmetic for that reason.
+
+### One command parser, two front ends
+
+`parse_command` takes the tokens of `<name> <a> [b]` and is called by both the
+scenario's `at` directive and the terminal's `:` line. A command cannot mean
+one thing in a script and another when typed, which matters here more than
+usual because a session typed into the board is replayed through the script.
+
+The board's one-key shortcuts go through `command_kind_from_name` rather than a
+hard-coded identifier, so `h` cannot drift from `commands.fypp`.
+
+### Redirect stdout only from a generator
+
+`autogen.sh` used `>&`, which sends fypp's diagnostics into the generated file.
+A template error became a committed `.f90` containing a traceback, with nothing
+on the terminal to say so. It presents as the script producing no output at
+all.
+
+### The terminal changes nothing about the simulation
+
+Sim time still advances only through `run_until`, commands still go through
+`submit`, and the digest of a day watched interactively is the digest of the
+same day in batch. The board is a second consumer of the query layer, exactly
+as a graphical client would be. `--play` is refused outright without a terminal
+rather than guessed at.
+
+### Ask FetchContent where a dependency ended up
+
+`${pic_BINARY_DIR}/modules`, never a guess at where pic keeps its `.mod` files.
+pic v0.8.2 moved them from `${CMAKE_BINARY_DIR}/modules` to
+`${PROJECT_BINARY_DIR}/modules` -- correct, since a dependency writing into its
+parent's build tree collides the moment two of them do -- and every consumer
+with the old spelling hardcoded stopped compiling.
+
+### One `error_t` per call, never a shared one
+
+`error_t` accumulates: a failure left in it is still there at the next check.
+Reusing one variable across `term_size` and `term_raw_enter` made an
+unavailable terminal size look like a failure to enter raw mode, and the board
+refused to start. Cost half an hour to find because the symptom named the wrong
+call.
 
 ### An aircraft commits to a route it can complete, or waits
 

@@ -50,7 +50,7 @@ module core_sim
 
    public :: sim_t
 
-   ! ---- the façade ----------------------------------------------------------
+   ! ---- the facade ----------------------------------------------------------
    !
    ! `app/` uses this module and nothing else from `core/`, so everything it
    ! legitimately needs is re-exported here. That is what makes the CI grep a

@@ -27,7 +27,8 @@ set_target_properties(
   PROPERTIES Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/test_modules"
              RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-target_include_directories(fairport-tester PRIVATE "${fairport_module_dir}")
+target_include_directories(fairport-tester PRIVATE "${fairport_module_dir}"
+                                                   "${pic_module_dir}")
 target_compile_options(fairport-tester PRIVATE ${fairport_flags})
 target_link_libraries(fairport-tester PRIVATE fairport::app
                                               test-drive::test-drive)
@@ -63,6 +64,29 @@ add_test(
     ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
     -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/full_day.txt -P
     ${CMAKE_CURRENT_SOURCE_DIR}/determinism.cmake
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# A session saved is a session replayable. `--save` writes the command log back
+# out as an ordinary scenario, which is what turns a day played on the
+# interactive board into a bug report or a regression test. costly_favour is the
+# one with a command in it; clear_day is the empty-log case, where the save is
+# nothing but the world and the horizon.
+add_test(
+  NAME "fairport/roundtrip_costly_favour"
+  COMMAND
+    ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
+    -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/costly_favour.txt
+    -DSAVE=${CMAKE_CURRENT_BINARY_DIR}/roundtrip_favour.txt -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/roundtrip.cmake
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+add_test(
+  NAME "fairport/roundtrip_clear_day"
+  COMMAND
+    ${CMAKE_COMMAND} -DFAIRPORT=$<TARGET_FILE:fairport>
+    -DSCENARIO=${CMAKE_SOURCE_DIR}/scenarios/clear_day.txt
+    -DSAVE=${CMAKE_CURRENT_BINARY_DIR}/roundtrip_clear.txt -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/roundtrip.cmake
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # The layering rules, as a test rather than as a paragraph nobody reads.

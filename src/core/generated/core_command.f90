@@ -27,6 +27,7 @@ module core_command
    !! what the handler acts on is exactly what was written down.
    use core_kinds, only: tick_k, id_k, int16, int32, int64, NO_ID
    use core_event_kinds, only: event_name
+   use core_time, only: SECOND, MINUTE, HOUR
    use pic_types, only: default_int
    use pic_error, only: error_t, error_raise, ERROR_ALLOC, ERROR_VALIDATION
    use pic_array_hash, only: array_hash64_t, array_hash64_hex
@@ -306,24 +307,45 @@ contains
       !! commands in a log: a session round-trips through the same parser a
       !! hand-written scenario does, so there is no second code path for saves
       !! to drift along.
+      !!
+      !! Times are written `HH:MM:SS.mmm`, to the millisecond, because that is
+      !! the resolution a tick has. A command issued from the interactive board
+      !! lands on whatever tick the frame was at, and rounding it to the
+      !! nearest second would move it relative to the events around it -- the
+      !! replay would then be a different day from the one that was played.
+      !! Hours are not wrapped at twenty-four -- `tick_split` wraps, which is
+      !! right for a clock face and wrong for a save -- so a session running
+      !! past midnight reads back as the time it happened.
       class(command_log_t), intent(in) :: this
       integer, intent(in) :: unit
          !! Unit open for formatted writing.
       type(error_t), intent(inout), optional :: err
 
       integer(default_int) :: i
+      integer(tick_k) :: rest
+      integer(int32) :: hours, minutes, seconds, millis
       integer :: status
 
       do i = 1_default_int, this%n
+         rest = this%at(i)
+         hours = int(rest/HOUR, int32)
+         rest = modulo(rest, HOUR)
+         minutes = int(rest/MINUTE, int32)
+         rest = modulo(rest, MINUTE)
+         seconds = int(rest/SECOND, int32)
+         millis = int(modulo(rest, SECOND), int32)
+
          ! Deliberately not list-directed: an explicit format keeps the text
          ! identical on every compiler, which a golden test depends on.
          if (command_arg_count(this%kind(i)) >= 2_int32) then
-            write (unit, "(a,i0,a,i0,1x,i0)", iostat=status) &
-               "at ", this%at(i), " "//command_name(this%kind(i))//" ", &
+            write (unit, "(a,i0.2,a,i0.2,a,i0.2,a,i0.3,a,i0,1x,i0)", iostat=status) &
+               "at ", hours, ":", minutes, ":", seconds, ".", millis, &
+               " "//command_name(this%kind(i))//" ", &
                this%subject_a(i), this%subject_b(i)
          else
-            write (unit, "(a,i0,a,i0)", iostat=status) &
-               "at ", this%at(i), " "//command_name(this%kind(i))//" ", &
+            write (unit, "(a,i0.2,a,i0.2,a,i0.2,a,i0.3,a,i0)", iostat=status) &
+               "at ", hours, ":", minutes, ":", seconds, ".", millis, &
+               " "//command_name(this%kind(i))//" ", &
                this%subject_a(i)
          end if
          if (status /= 0) then

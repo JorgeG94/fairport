@@ -32,7 +32,7 @@ while read -r template output; do
     diff -u "$destination$output" "$scratch/$output" | head -40
     status=1
   fi
-done < <(grep -E '^fypp .*>& ' autogen.sh | awk '{print $2, $4}')
+done < <(grep -E '^fypp .*> ' autogen.sh | awk '{print $2, $4}')
 
 if [ "$status" -eq 0 ]; then
   echo "generated sources: up to date"

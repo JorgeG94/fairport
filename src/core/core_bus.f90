@@ -89,7 +89,16 @@ contains
       slot = int(this%n_subs(column), default_int)
       do while (slot >= 1_default_int)
          if (this%subs(slot, column)%order <= order) exit
-         this%subs(slot + 1, column) = this%subs(slot, column)
+         ! Component by component, and `=>` for the pointer, rather than one
+         ! whole-derived-type assignment. The standard says intrinsic
+         ! assignment of a pointer component *is* pointer assignment -- the
+         ! association is copied and neither side owns anything -- and LFortran
+         ! 0.66.0 deep-copies instead, then frees both at teardown:
+         ! `free(): double free detected in tcache 2`, from a program whose
+         ! answers were all correct. Spelling it out costs nothing, says what
+         ! is meant, and is what the two lines below already do.
+         this%subs(slot + 1, column)%sys => this%subs(slot, column)%sys
+         this%subs(slot + 1, column)%order = this%subs(slot, column)%order
          slot = slot - 1_default_int
       end do
 

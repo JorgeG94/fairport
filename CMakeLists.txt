@@ -52,6 +52,17 @@ set(FAIRPORT_PIC_TAG
     "82785ccf"
     CACHE STRING "pic commit to pin; v0.8.2")
 
+# LFortran does not perform automatic reallocation on assignment -- standard
+# since Fortran 2003 -- unless asked, and without it `x = [ ... ]` fails at run
+# time with "array is not allocated" rather than at compile time. That is the
+# compiler implementing the language, not a warning preference, so it belongs in
+# the global flags where the fetched dependencies get it too: test-drive and
+# toml-f build their own test programs, and those failed for exactly this reason
+# while the flag was per-target.
+if(CMAKE_Fortran_COMPILER_ID MATCHES "LFortran")
+  string(APPEND CMAKE_Fortran_FLAGS " --realloc-lhs-arrays")
+endif()
+
 include(FetchContent)
 
 # pic's own suite is not fairport's to run, and turning it off keeps pic's
@@ -129,19 +140,17 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel|IntelLLVM")
   set(fairport_flags "-stand" "f18" "-traceback")
   set(fairport_warnings "-warn" "all")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "LFortran")
-  # Automatic reallocation on assignment is standard since Fortran 2003 and
-  # LFortran does not do it unless asked. Without this, `tokens = tokenize(..)`
-  # and every `testsuite = [ ... ]` fail at run time with "array is not
-  # allocated" rather than at compile time, so the flag is not a nicety.
+  # `--realloc-lhs-arrays` is set globally further up, before the dependencies
+  # are configured, because test-drive and toml-f build their own test programs
+  # and need it too.
   #
-  # LFortran is not usable for fairport at 0.66.0 even with it. Anything that
-  # builds a `sim_t` corrupts the heap -- `double free or corruption (fasttop)`
-  # in every suite that runs a simulation, and a batch run reports no aircraft
-  # ever parking while three of the four still depart. The bus holds
-  # `class(system_t)` pointers into components of a `target` simulation, which
-  # is legal and which gfortran and ifx both get right. This flag is here so the
-  # next attempt starts from the real problem instead of this one.
-  set(fairport_flags "--realloc-lhs-arrays")
+  # Nothing else here. LFortran has no -Wall to hold to yet, and the build type
+  # matters more than any flag: Release works, RelWithDebInfo does not, because
+  # -g sends LFortran looking for `llvm-dwarfdump` and the conda environment
+  # does not ship it. It fails in pic's own `app` target with "Error in creating
+  # the files used to generate the debug information", which reads like a
+  # fairport problem and is not one.
+  set(fairport_flags)
   set(fairport_warnings)
 else()
   set(fairport_flags)

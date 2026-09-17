@@ -274,6 +274,49 @@ pic v0.8.2 moved them from `${CMAKE_BINARY_DIR}/modules` to
 parent's build tree collides the moment two of them do -- and every consumer
 with the old spelling hardcoded stopped compiling.
 
+### Assign a pointer component with `=>`, never by assigning its parent
+
+`bus_subscribe`'s insertion sort used to shift slots with one whole-derived-type
+assignment:
+
+```fortran
+this%subs(slot + 1, column) = this%subs(slot, column)
+```
+
+`subscriber_t` holds a `class(system_t), pointer`. The standard says intrinsic
+assignment of a pointer component *is* pointer assignment -- the association is
+copied and neither side owns anything -- and LFortran 0.66.0 deep-copies
+instead, then frees both at teardown. Doing it component by component, with
+`=>` for the pointer, is the same thing in gfortran and the difference between
+working and not in LFortran.
+
+The symptom was worth more than the fix. Every suite that ran a simulation died
+with `double free or corruption (fasttop)` **after printing correct answers**,
+and a batch run reported no aircraft ever parking while three of four still
+departed. It looked like the bus's `class(system_t)` pointers into a `target`
+`sim_t` were the problem -- they were not, and that hypothesis cost an hour.
+The reproducer is twenty lines: a type with a pointer component, in an array,
+assigned once.
+
+### The cross-compiler digest is real now
+
+gfortran and LFortran 0.66.0 agree on all six scenario digests, and both run
+34/34. That is the fan-in the design asks for, demonstrated rather than
+asserted, and it is what caught the bus bug -- the digests differed first, and
+the crash was found while explaining why.
+
+Two things LFortran needs, both in `CMakeLists.txt`:
+
+- `--realloc-lhs-arrays`, set **globally**, before the dependencies are
+  configured. Automatic reallocation on assignment is standard since Fortran
+  2003 and LFortran does not do it unless asked; without it `x = [ ... ]` fails
+  at run time rather than at compile time. Set per-target it fixes fairport and
+  leaves test-drive's and toml-f's own test programs failing.
+- Release, not RelWithDebInfo. `-g` sends LFortran looking for
+  `llvm-dwarfdump`, which the conda environment does not ship, and it fails in
+  pic's `app` target with "Error in creating the files used to generate the
+  debug information" -- which names neither the real cause nor fairport.
+
 ### One `error_t` per call, never a shared one
 
 `error_t` accumulates: a failure left in it is still there at the next check.

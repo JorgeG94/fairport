@@ -27,7 +27,10 @@ project(
   DESCRIPTION "Deterministic airport operations simulator")
 set(project_name fairport)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/modules")
+# cmake/ holds fairport's own modules, cmake/modules/ the Find modules for its
+# dependencies. Both are on the path.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake"
+     "${CMAKE_CURRENT_LIST_DIR}/cmake/modules")
 
 option(FAIRPORT_ENABLE_TESTING "Enable testing for fairport" ON)
 
@@ -49,19 +52,14 @@ set(FAIRPORT_PIC_REPOSITORY
     "https://github.com/JorgeG94/pic.git"
     CACHE STRING "Git repository to fetch pic from")
 set(FAIRPORT_PIC_TAG
-    "82785ccf"
-    CACHE STRING "pic commit to pin; v0.8.2")
+    "v0.9.2"
+    CACHE STRING "pic version to pin")
 
-# LFortran does not perform automatic reallocation on assignment -- standard
-# since Fortran 2003 -- unless asked, and without it `x = [ ... ]` fails at run
-# time with "array is not allocated" rather than at compile time. That is the
-# compiler implementing the language, not a warning preference, so it belongs in
-# the global flags where the fetched dependencies get it too: test-drive and
-# toml-f build their own test programs, and those failed for exactly this reason
-# while the flag was per-target.
-if(CMAKE_Fortran_COMPILER_ID MATCHES "LFortran")
-  string(APPEND CMAKE_Fortran_FLAGS " --realloc-lhs-arrays")
-endif()
+# cmake/FairportFlags.cmake    every compiler flag, and the build-type default
+#
+# Included here rather than further down because it sets global flags, and a
+# global flag set after a dependency is configured does not reach it.
+include(FairportFlags)
 
 include(FetchContent)
 
@@ -118,44 +116,6 @@ FetchContent_MakeAvailable(toml-f)
 # does not care which spelling pic uses next.
 set(fairport_module_dir "${CMAKE_BINARY_DIR}/modules")
 set(pic_module_dir "${pic_BINARY_DIR}/modules")
-
-if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
-  set(fairport_flags "-std=f2018" "-ffree-line-length-none" "-fbacktrace")
-  set(fairport_warnings
-      "-Wall"
-      "-Wextra"
-      "-Werror"
-      "-fimplicit-none"
-      # `self` is genuinely unused in a constant accessor like tick_order.
-      "-Wno-unused-dummy-argument"
-      # gfortran cannot see that `x = f()` allocates an allocatable array of a
-      # derived type, and reports every tokenize result as maybe-uninitialized
-      # once the optimiser is on. A false positive, and the only one, so the
-      # rest of -Werror stays worth having.
-      "-Wno-maybe-uninitialized")
-  # No -ffpe-trap here. fairport's core is integer-only by design, so there is
-  # no floating-point exception for it to catch, and pic's own tokenizer and
-  # NaN-canonicalisation tests trap under it.
-elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel|IntelLLVM")
-  set(fairport_flags "-stand" "f18" "-traceback")
-  set(fairport_warnings "-warn" "all")
-elseif(CMAKE_Fortran_COMPILER_ID MATCHES "LFortran")
-  # `--realloc-lhs-arrays` is set globally further up, before the dependencies
-  # are configured, because test-drive and toml-f build their own test programs
-  # and need it too.
-  #
-  # Nothing else here. LFortran has no -Wall to hold to yet, and the build type
-  # matters more than any flag: Release works, RelWithDebInfo does not, because
-  # -g sends LFortran looking for `llvm-dwarfdump` and the conda environment
-  # does not ship it. It fails in pic's own `app` target with "Error in creating
-  # the files used to generate the debug information", which reads like a
-  # fairport problem and is not one.
-  set(fairport_flags)
-  set(fairport_warnings)
-else()
-  set(fairport_flags)
-  set(fairport_warnings)
-endif()
 
 add_library(fairport_core STATIC)
 add_library(fairport::core ALIAS fairport_core)
